@@ -149,6 +149,14 @@
   .upd-prog.show{display:block}
   .upd-bar{height:100%;width:0;background:var(--ok);transition:width .3s}
 
+  /* barre de progression de la réparation */
+  .rprog{display:none;margin-top:14px;height:24px;border-radius:9px;background:#33363d;
+    position:relative;overflow:hidden}
+  .rprog.show{display:block}
+  .rprog-bar{height:100%;width:0;background:var(--acc);transition:width .25s}
+  .rprog-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:12px;font-weight:700;color:#fff;mix-blend-mode:difference}
+
   /* viewers 3D */
   .vtools{display:flex;gap:18px;align-items:center;margin-bottom:12px;
     font-family:var(--mono);font-size:12px;color:var(--muted)}
@@ -216,6 +224,7 @@
   <div class="card">
     <span class="card-n">03 · LANCER</span>
     <button id="run" disabled>Charge un modèle d'abord</button>
+    <div class="rprog" id="rprog"><div class="rprog-bar" id="rprog-bar"></div><span class="rprog-txt" id="rprog-txt"></span></div>
     <div class="err" id="err"></div>
   </div>
 
@@ -356,12 +365,33 @@ function updateRun(){
   else if(!selectedFile) btn.textContent="Charge un modèle d'abord";
 }
 
+// --- barre de progression (interroge /api/repair/progress) ---
+let repPoll=null;
+function startRepairPoll(){
+  $('#rprog').classList.add('show');
+  $('#rprog-bar').style.width='0%';
+  $('#rprog-txt').textContent='Démarrage…';
+  repPoll=setInterval(async()=>{
+    try{
+      const p=await (await fetch('/api/repair/progress')).json();
+      const pct=p.percent||0;
+      $('#rprog-bar').style.width=pct+'%';
+      $('#rprog-txt').textContent=(p.stage||'')+' · '+pct+'%';
+    }catch(e){}
+  },250);
+}
+function stopRepairPoll(){
+  if(repPoll){clearInterval(repPoll);repPoll=null;}
+  $('#rprog').classList.remove('show');
+}
+
 // --- lancer la réparation ---
 $('#run').onclick=async()=>{
   if(!selectedFile||!selectedMethod) return;
   const btn=$('#run'), err=$('#err');
   err.classList.remove('show'); $('#result').classList.remove('show');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>Traitement en cours…';
+  startRepairPoll();
 
   const fd=new FormData();
   fd.append('file',selectedFile);
@@ -378,6 +408,7 @@ $('#run').onclick=async()=>{
   }catch(e){
     err.textContent='⚠ '+e.message; err.classList.add('show');
   }finally{
+    stopRepairPoll();
     btn.disabled=false; updateRun();
   }
 };

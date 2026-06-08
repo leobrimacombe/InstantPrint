@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 import repair
 import updater
@@ -25,8 +26,8 @@ ALLOWED = {".stl", ".obj", ".ply", ".glb", ".gltf", ".off", ".3mf", ".dae"}
 # Dossier temporaire pour les résultats (token -> chemin)
 WORK = Path(tempfile.gettempdir()) / "instantprint_jobs"
 WORK.mkdir(exist_ok=True)
-_JOBS: dict[str, Path] = {}        # job -> STL réparé (téléchargeable)
-_PREVIEWS: dict[str, Path] = {}    # job -> STL "avant" (pour le viewer 3D)
+_JOBS: dict[str, Path] = {}        # job -> STL réparé pleine qualité (téléchargeable)
+_PREVIEWS: dict[str, dict] = {}    # job -> {"before": Path, "after": Path} (viewer 3D, allégé)
 
 
 def _write_preview(mesh, path: Path, cap: int = 400000) -> None:
@@ -65,6 +66,7 @@ async def do_repair(
     smooth: int = Form(8),
     depth: int = Form(9),
 ):
+    repair._p("Réception du fichier", 1)
     if method not in repair.METHODS:
         raise HTTPException(400, f"Méthode inconnue : {method}")
 
@@ -77,35 +79,45 @@ async def do_repair(
     in_path = WORK / f"{job}_in{ext}"
     in_path.write_bytes(await file.read())
 
-    # Stats AVANT + aperçu 3D du modèle d'origine
+    # Stats AVANT + aperçu 3D du modèle d'origine (hors boucle d'event)
     try:
-        before_mesh = repair._load(str(in_path))
+        repair._p("Lecture du modèle", 4)
+        before_mesh = await run_in_threadpool(repair._load, str(in_path))
         before = repair.stats(before_mesh)
         prev_path = WORK / f"{job}_before.stl"
-        _write_preview(before_mesh, prev_path)
-        _PREVIEWS[job] = prev_path
+        await run_in_threadpool(_write_preview, before_mesh, prev_path)
+        _PREVIEWS[job] = {"before": prev_path}
     except Exception as e:
         in_path.unlink(missing_ok=True)
         raise HTTPException(400, f"Impossible de lire le modèle : {e}")
 
-    # Réparer — on ne passe que les paramètres déclarés par la méthode choisie
+    # Réparer — on ne passe que les paramètres déclarés par la méthode choisie.
+    # Exécuté dans un thread pour que /api/repair/progress reste interrogeable.
     spec = repair.METHODS[method]
     available = {"pitch_ratio": pitch_ratio, "smooth": smooth, "depth": depth}
     kwargs = {p["name"]: available[p["name"]]
               for p in spec["params"] if p["name"] in available}
     try:
-        result = spec["fn"](str(in_path), **kwargs)
+        result = await run_in_threadpool(lambda: spec["fn"](str(in_path), **kwargs))
     except Exception as e:
         in_path.unlink(missing_ok=True)
+        repair._p("Erreur", 0)
         raise HTTPException(500, f"Échec de la réparation : {e}")
 
     # Exporter en STL (format universel pour l'impression)
+    repair._p("Export du STL", 99)
     out_path = WORK / f"{job}_repaired.stl"
-    result.export(str(out_path))
+    await run_in_threadpool(result.export, str(out_path))
     after = repair.stats(result)
+
+    # aperçu 3D du résultat (allégé pour le viewer ; le téléchargement reste full)
+    prev_after = WORK / f"{job}_after.stl"
+    await run_in_threadpool(_write_preview, result, prev_after)
+    _PREVIEWS[job]["after"] = prev_after
 
     _JOBS[job] = out_path
     in_path.unlink(missing_ok=True)
+    repair._p("Terminé", 100)
 
     return JSONResponse({
         "job": job,
@@ -113,15 +125,16 @@ async def do_repair(
         "before": before,
         "after": after,
         "download_url": f"/api/download/{job}",
-        "preview_before_url": f"/api/preview/{job}",
-        "preview_after_url": f"/api/download/{job}",
+        "preview_before_url": f"/api/preview/{job}/before",
+        "preview_after_url": f"/api/preview/{job}/after",
     })
 
 
-@app.get("/api/preview/{job}")
-def preview(job: str):
-    """STL du modèle d'origine, servi en ligne pour le viewer 3D."""
-    path = _PREVIEWS.get(job)
+@app.get("/api/preview/{job}/{which}")
+def preview(job: str, which: str):
+    """STL allégé (avant/après) servi en ligne pour le viewer 3D."""
+    entry = _PREVIEWS.get(job) or {}
+    path = entry.get(which)
     if not path or not path.exists():
         raise HTTPException(404, "Aperçu introuvable ou expiré")
     return FileResponse(str(path), media_type="model/stl")
@@ -134,6 +147,12 @@ def download(job: str):
         raise HTTPException(404, "Résultat introuvable ou expiré")
     return FileResponse(str(path), filename="modele_repare.stl",
                         media_type="application/octet-stream")
+
+
+@app.get("/api/repair/progress")
+def repair_progress():
+    """Avancement de la réparation en cours (étape + pourcentage)."""
+    return repair.progress()
 
 
 @app.get("/api/version")

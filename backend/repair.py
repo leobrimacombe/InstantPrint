@@ -10,6 +10,20 @@ import trimesh
 import numpy as np
 
 
+# Progression partagée, lue par /api/repair/progress (un seul job à la fois
+# dans une app de bureau mono-utilisateur).
+_PROGRESS = {"stage": "En attente", "percent": 0}
+
+
+def progress() -> dict:
+    return dict(_PROGRESS)
+
+
+def _p(stage: str, percent: int) -> None:
+    _PROGRESS["stage"] = stage
+    _PROGRESS["percent"] = int(percent)
+
+
 def _load(path: str) -> trimesh.Trimesh:
     """Charge n'importe quel format et force un mesh unique (pas une Scene)."""
     m = trimesh.load(path, process=True, force="mesh")
@@ -71,10 +85,13 @@ def _decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
 # ---------------------------------------------------------------------------
 def meshfix_repair(path: str, join_parts: int = 0) -> trimesh.Trimesh:
     import pymeshfix
+    _p("Lecture du modèle", 10)
     m = _load(path)
+    _p("Réparation (MeshFix)", 45)
     mf = pymeshfix.MeshFix(m.vertices, m.faces)
     # remove_smallest_components=False : on garde toutes les pièces du modèle.
     mf.repair(joincomp=bool(join_parts), remove_smallest_components=False)
+    _p("Finalisation", 90)
     r = trimesh.Trimesh(mf.points, mf.faces, process=True)
     trimesh.repair.fix_normals(r)
     return r
@@ -88,11 +105,16 @@ def meshfix_repair(path: str, join_parts: int = 0) -> trimesh.Trimesh:
 # rester léger (utile pour les vaisseaux / hard-surface).
 # pitch_ratio bas = plus de détails + plus lent.
 # ---------------------------------------------------------------------------
-def voxel_remesh(path: str, pitch_ratio: float = 0.008, smooth: int = 8,
-                 max_faces: int = 150000) -> trimesh.Trimesh:
+def voxel_remesh(path: str, pitch_ratio: float = 0.006, smooth: int = 8,
+                 max_faces: int = 2000000) -> trimesh.Trimesh:
+    _p("Lecture du modèle", 5)
     m = _load(path)
     pitch = float(m.extents.max()) * float(pitch_ratio)
-    grid = m.voxelized(pitch=pitch).fill()
+    _p("Voxelisation", 20)
+    vox = m.voxelized(pitch=pitch)
+    _p("Remplissage du volume", 45)
+    grid = vox.fill()
+    _p("Reconstruction de la surface", 65)
     rem = grid.marching_cubes.copy()
     # CRUCIAL : marching_cubes renvoie un mesh en coordonnées de grille ;
     # on applique la transform (échelle = pitch, origine) pour revenir en mm.
@@ -100,12 +122,15 @@ def voxel_remesh(path: str, pitch_ratio: float = 0.008, smooth: int = 8,
     # Lissage Taubin : gomme l'effet "marches d'escalier" des voxels SANS
     # rétrécir le modèle (préserve le volume), et garde l'étanchéité.
     if smooth and int(smooth) > 0:
+        _p("Lissage", 80)
         trimesh.smoothing.filter_taubin(rem, iterations=int(smooth))
     if len(rem.faces) > max_faces:
+        _p("Allègement", 90)
         dec = _decimate(rem, max_faces)
         # on ne garde la décimation que si elle préserve l'étanchéité
         if dec.is_watertight:
             rem = dec
+    _p("Finalisation", 97)
     trimesh.repair.fix_normals(rem)
     return rem
 
@@ -118,6 +143,7 @@ def voxel_remesh(path: str, pitch_ratio: float = 0.008, smooth: int = 8,
 # ---------------------------------------------------------------------------
 def poisson_repair(path: str, depth: int = 9) -> trimesh.Trimesh:
     import pymeshlab
+    _p("Lecture du modèle", 10)
     fd, src = tempfile.mkstemp(suffix=".stl")
     os.close(fd)
     _load(path).export(src)   # normalise l'entrée via trimesh
@@ -125,8 +151,11 @@ def poisson_repair(path: str, depth: int = 9) -> trimesh.Trimesh:
     ms.load_new_mesh(src)
     ms.meshing_remove_duplicate_vertices()
     ms.meshing_remove_unreferenced_vertices()
+    _p("Calcul des normales", 30)
     ms.compute_normal_per_vertex()   # Poisson a besoin de normales
+    _p("Reconstruction (Poisson)", 55)
     ms.generate_surface_reconstruction_screened_poisson(depth=int(depth), preclean=True)
+    _p("Finalisation", 90)
     fd2, out = tempfile.mkstemp(suffix=".stl")
     os.close(fd2)
     try:
@@ -152,22 +181,22 @@ def convex_hull(path: str) -> trimesh.Trimesh:
 
 
 METHODS = {
-    "meshfix": {
-        "fn": meshfix_repair,
-        "label": "Fidèle (MeshFix) ⭐",
-        "desc": "Rend étanche en GARDANT le détail d'origine (bouche les trous, répare le non-manifold). Zéro perte de résolution. Le meilleur choix pour les modèles détaillés.",
-        "params": [],
-    },
     "voxel": {
         "fn": voxel_remesh,
-        "label": "Voxel — Solide (filet de sécurité)",
-        "desc": "Reconstruit un solide à partir de zéro. Garantit l'étanchéité même sur un modèle irrécupérable, mais perd le détail fin. Lissage réglable.",
+        "label": "Voxel — Solide ⭐",
+        "desc": "Reconstruit un solide étanche, dimensions exactes. Pousse la finesse vers le minimum pour un rendu ≈ 1:1 (plus lent, fichier plus lourd). Le choix sûr.",
         "params": [
-            {"name": "pitch_ratio", "label": "Finesse (bas = + de détail, + lent)",
-             "type": "float", "default": 0.008, "min": 0.003, "max": 0.025, "step": 0.001},
+            {"name": "pitch_ratio", "label": "Finesse (bas = Max ≈1:1, + lent)",
+             "type": "float", "default": 0.006, "min": 0.0015, "max": 0.02, "step": 0.0005},
             {"name": "smooth", "label": "Lissage anti-cubes (0 = brut)",
              "type": "int", "default": 8, "min": 0, "max": 40, "step": 2},
         ],
+    },
+    "meshfix": {
+        "fn": meshfix_repair,
+        "label": "Fidèle (MeshFix)",
+        "desc": "Répare en gardant la géométrie d'origine (zéro perte de résolution). Excellent si le modèle s'y prête, mais peut échouer sur les assets très fragmentés.",
+        "params": [],
     },
     "poisson": {
         "fn": poisson_repair,
