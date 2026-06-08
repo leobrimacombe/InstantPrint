@@ -69,7 +69,8 @@ def _decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
 # rester léger (utile pour les vaisseaux / hard-surface).
 # pitch_ratio bas = plus de détails + plus lent.
 # ---------------------------------------------------------------------------
-def voxel_remesh(path: str, pitch_ratio: float = 0.01, max_faces: int = 150000) -> trimesh.Trimesh:
+def voxel_remesh(path: str, pitch_ratio: float = 0.008, smooth: int = 8,
+                 max_faces: int = 150000) -> trimesh.Trimesh:
     m = _load(path)
     pitch = float(m.extents.max()) * float(pitch_ratio)
     grid = m.voxelized(pitch=pitch).fill()
@@ -77,6 +78,10 @@ def voxel_remesh(path: str, pitch_ratio: float = 0.01, max_faces: int = 150000) 
     # CRUCIAL : marching_cubes renvoie un mesh en coordonnées de grille ;
     # on applique la transform (échelle = pitch, origine) pour revenir en mm.
     rem.apply_transform(grid.transform)
+    # Lissage Taubin : gomme l'effet "marches d'escalier" des voxels SANS
+    # rétrécir le modèle (préserve le volume), et garde l'étanchéité.
+    if smooth and int(smooth) > 0:
+        trimesh.smoothing.filter_taubin(rem, iterations=int(smooth))
     if len(rem.faces) > max_faces:
         rem = _decimate(rem, max_faces)
     trimesh.repair.fix_normals(rem)
@@ -121,7 +126,7 @@ def poisson_repair(path: str, depth: int = 9) -> trimesh.Trimesh:
 # instantané ou un aperçu avant de lancer la version précise.
 # ---------------------------------------------------------------------------
 def voxel_fast(path: str) -> trimesh.Trimesh:
-    return voxel_remesh(path, pitch_ratio=0.02, max_faces=10**9)
+    return voxel_remesh(path, pitch_ratio=0.02, smooth=0, max_faces=10**9)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +145,9 @@ METHODS = {
         "desc": "Reconstruit un solide étanche aux dimensions exactes. Le choix sûr, même sur asset cassé (vaisseaux, hard-surface).",
         "params": [
             {"name": "pitch_ratio", "label": "Finesse (bas = + de détail, + lent)",
-             "type": "float", "default": 0.01, "min": 0.004, "max": 0.025, "step": 0.002},
+             "type": "float", "default": 0.008, "min": 0.003, "max": 0.025, "step": 0.001},
+            {"name": "smooth", "label": "Lissage anti-cubes (0 = brut)",
+             "type": "int", "default": 8, "min": 0, "max": 40, "step": 2},
         ],
     },
     "poisson": {

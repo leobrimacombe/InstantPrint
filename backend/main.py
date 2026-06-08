@@ -61,7 +61,8 @@ def list_methods():
 async def do_repair(
     file: UploadFile = File(...),
     method: str = Form(...),
-    pitch_ratio: float = Form(0.01),
+    pitch_ratio: float = Form(0.008),
+    smooth: int = Form(8),
     depth: int = Form(9),
 ):
     if method not in repair.METHODS:
@@ -89,7 +90,7 @@ async def do_repair(
 
     # Réparer — on ne passe que les paramètres déclarés par la méthode choisie
     spec = repair.METHODS[method]
-    available = {"pitch_ratio": pitch_ratio, "depth": depth}
+    available = {"pitch_ratio": pitch_ratio, "smooth": smooth, "depth": depth}
     kwargs = {p["name"]: available[p["name"]]
               for p in spec["params"] if p["name"] in available}
     try:
