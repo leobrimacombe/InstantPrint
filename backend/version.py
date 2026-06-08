@@ -5,4 +5,4 @@ Version de l'application — SOURCE UNIQUE.
 installer/instantprint.iss (les deux doivent correspondre), puis publie une
 release GitHub taguée "v<version>" avec l'asset InstantPrint-Setup-<version>.exe.
 """
-__version__ = "1.0.0"
+__version__ = "1.1.0"
