@@ -62,7 +62,26 @@ def _decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
 
 
 # ---------------------------------------------------------------------------
-# METHODE 1 — VOXEL REMESH (SOLIDE)  ⭐ LE CHOIX SÛR
+# METHODE 1 — MESHFIX (FIDÈLE)  ⭐ PRÉSERVE LE DÉTAIL
+# Algorithme de Marco Attene : rend le maillage manifold et étanche en
+# CONSERVANT la géométrie d'origine (bouche les trous, retire les
+# auto-intersections, répare le non-manifold). Aucune perte de résolution,
+# dimensions exactes. Idéal pour les modèles détaillés (vaisseaux SC).
+# Si le modèle est vraiment trop cassé, se rabattre sur le Voxel.
+# ---------------------------------------------------------------------------
+def meshfix_repair(path: str, join_parts: int = 0) -> trimesh.Trimesh:
+    import pymeshfix
+    m = _load(path)
+    mf = pymeshfix.MeshFix(m.vertices, m.faces)
+    # remove_smallest_components=False : on garde toutes les pièces du modèle.
+    mf.repair(joincomp=bool(join_parts), remove_smallest_components=False)
+    r = trimesh.Trimesh(mf.points, mf.faces, process=True)
+    trimesh.repair.fix_normals(r)
+    return r
+
+
+# ---------------------------------------------------------------------------
+# METHODE 2 — VOXEL REMESH (SOLIDE)  — LE FILET DE SÉCURITÉ
 # Transforme le modèle en voxels, remplit l'intérieur, reconstruit la surface
 # (marching cubes). Résultat TOUJOURS étanche, aux BONNES dimensions, même sur
 # un asset complètement cassé. Décimation finale qui préserve les arêtes pour
@@ -83,7 +102,10 @@ def voxel_remesh(path: str, pitch_ratio: float = 0.008, smooth: int = 8,
     if smooth and int(smooth) > 0:
         trimesh.smoothing.filter_taubin(rem, iterations=int(smooth))
     if len(rem.faces) > max_faces:
-        rem = _decimate(rem, max_faces)
+        dec = _decimate(rem, max_faces)
+        # on ne garde la décimation que si elle préserve l'étanchéité
+        if dec.is_watertight:
+            rem = dec
     trimesh.repair.fix_normals(rem)
     return rem
 
@@ -121,15 +143,6 @@ def poisson_repair(path: str, depth: int = 9) -> trimesh.Trimesh:
 
 
 # ---------------------------------------------------------------------------
-# METHODE 3 — VOXEL RAPIDE
-# Voxel basse résolution, sans décimation : le plus rapide, pour un test
-# instantané ou un aperçu avant de lancer la version précise.
-# ---------------------------------------------------------------------------
-def voxel_fast(path: str) -> trimesh.Trimesh:
-    return voxel_remesh(path, pitch_ratio=0.02, smooth=0, max_faces=10**9)
-
-
-# ---------------------------------------------------------------------------
 # METHODE 4 — CONVEX HULL
 # Dernier recours : enveloppe convexe pleine autour du modèle. Toujours
 # imprimable mais perd toute la forme concave. Utile pour un socle / test.
@@ -139,10 +152,16 @@ def convex_hull(path: str) -> trimesh.Trimesh:
 
 
 METHODS = {
+    "meshfix": {
+        "fn": meshfix_repair,
+        "label": "Fidèle (MeshFix) ⭐",
+        "desc": "Rend étanche en GARDANT le détail d'origine (bouche les trous, répare le non-manifold). Zéro perte de résolution. Le meilleur choix pour les modèles détaillés.",
+        "params": [],
+    },
     "voxel": {
         "fn": voxel_remesh,
-        "label": "Voxel — Solide ⭐",
-        "desc": "Reconstruit un solide étanche aux dimensions exactes. Le choix sûr, même sur asset cassé (vaisseaux, hard-surface).",
+        "label": "Voxel — Solide (filet de sécurité)",
+        "desc": "Reconstruit un solide à partir de zéro. Garantit l'étanchéité même sur un modèle irrécupérable, mais perd le détail fin. Lissage réglable.",
         "params": [
             {"name": "pitch_ratio", "label": "Finesse (bas = + de détail, + lent)",
              "type": "float", "default": 0.008, "min": 0.003, "max": 0.025, "step": 0.001},
@@ -158,12 +177,6 @@ METHODS = {
             {"name": "depth", "label": "Détail (haut = + fin, + lent)",
              "type": "int", "default": 9, "min": 6, "max": 11, "step": 1},
         ],
-    },
-    "voxel_fast": {
-        "fn": voxel_fast,
-        "label": "Voxel — Rapide",
-        "desc": "Version basse résolution, sans décimation. Pour un test instantané.",
-        "params": [],
     },
     "convex": {
         "fn": convex_hull,
