@@ -128,10 +128,43 @@
   .spin{display:inline-block;width:15px;height:15px;border:2px solid #160a04;border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px}
   @keyframes s{to{transform:rotate(360deg)}}
   footer{text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;margin-top:30px}
+
+  /* bandeau mise à jour */
+  .upd{display:none;align-items:center;gap:14px;flex-wrap:wrap;
+    background:linear-gradient(90deg,#201a17,var(--panel));
+    border:1px solid var(--acc);border-radius:12px;padding:14px 18px;margin-bottom:22px;position:relative;overflow:hidden}
+  .upd.show{display:flex}
+  .upd-badge{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px;
+    background:var(--acc);color:#160a04;padding:3px 8px;border-radius:6px}
+  .upd-main{display:flex;align-items:center;gap:12px;flex:1;min-width:200px}
+  .upd-title{font-weight:600;font-size:14px}
+  .upd-title b{color:var(--acc2)}
+  .upd-notes{color:var(--muted);font-size:12px;font-family:var(--mono);margin-top:3px;
+    max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #upd-btn{border:none;border-radius:9px;padding:11px 18px;cursor:pointer;
+    background:var(--acc);color:#160a04;font-weight:800;font-family:var(--sans);font-size:14px;transition:.15s}
+  #upd-btn:hover{background:#ff723d}
+  #upd-btn:disabled{background:#33363d;color:#9aa;cursor:default}
+  .upd-prog{display:none;position:absolute;left:0;bottom:0;height:3px;width:100%;background:#33363d}
+  .upd-prog.show{display:block}
+  .upd-bar{height:100%;width:0;background:var(--ok);transition:width .3s}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <!-- bandeau de mise à jour (masqué tant qu'aucune version plus récente) -->
+  <div class="upd" id="upd">
+    <div class="upd-main">
+      <span class="upd-badge">MAJ</span>
+      <div>
+        <div class="upd-title">Nouvelle version <b id="upd-ver"></b> disponible</div>
+        <div class="upd-notes" id="upd-notes"></div>
+      </div>
+    </div>
+    <button id="upd-btn">Mettre à jour</button>
+    <div class="upd-prog" id="upd-prog"><div class="upd-bar" id="upd-bar"></div></div>
+  </div>
+
   <header>
     <h1>Instant<b>Print</b></h1>
     <span class="tag">v1.0 · trimesh · pymeshlab</span>
@@ -294,6 +327,49 @@ function showResult(d){
   $('#result').classList.add('show');
   $('#result').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
+
+// --- mises à jour ---
+async function checkUpdate(){
+  try{
+    const u = await (await fetch('/api/update/check')).json();
+    if(!u.update_available) return;
+    $('#upd-ver').textContent = 'v'+u.latest;
+    const firstLine = (u.notes||'').split('\n').find(l=>l.trim()) || '';
+    $('#upd-notes').textContent = firstLine.slice(0,120);
+    $('#upd').classList.add('show');
+    $('#upd-btn').onclick = startUpdate;
+  }catch(e){ /* hors-ligne / non configuré : on ignore */ }
+}
+async function startUpdate(){
+  const btn=$('#upd-btn');
+  btn.disabled=true; btn.textContent='Téléchargement…';
+  $('#upd-prog').classList.add('show');
+  try{
+    const res=await fetch('/api/update/install',{method:'POST'});
+    if(!res.ok){ const d=await res.json(); throw new Error(d.detail||'Erreur'); }
+    pollUpdate();
+  }catch(e){
+    btn.disabled=false; btn.textContent='Réessayer';
+    $('#upd-notes').textContent='⚠ '+e.message;
+  }
+}
+function pollUpdate(){
+  const iv=setInterval(async()=>{
+    try{
+      const p=await (await fetch('/api/update/progress')).json();
+      $('#upd-bar').style.width=(p.percent||0)+'%';
+      if(p.phase==='launching'||p.phase==='done'){
+        clearInterval(iv);
+        $('#upd-btn').textContent="Installation… l'app va redémarrer";
+      }else if(p.phase==='error'){
+        clearInterval(iv);
+        $('#upd-btn').disabled=false; $('#upd-btn').textContent='Réessayer';
+        $('#upd-notes').textContent='⚠ '+(p.error||'échec');
+      }
+    }catch(e){ clearInterval(iv); }
+  },500);
+}
+checkUpdate();
 </script>
 </body>
 </html>

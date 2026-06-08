@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import repair
+import updater
+from version import __version__
 
 app = FastAPI(title="InstantPrint")
 
@@ -102,6 +104,32 @@ def download(job: str):
         raise HTTPException(404, "Résultat introuvable ou expiré")
     return FileResponse(str(path), filename="modele_repare.stl",
                         media_type="application/octet-stream")
+
+
+@app.get("/api/version")
+def version():
+    return {"version": __version__}
+
+
+@app.get("/api/update/check")
+def update_check():
+    """Y a-t-il une nouvelle version ? Ne lève jamais (échec réseau = pas de MAJ)."""
+    return updater.check_for_update()
+
+
+@app.post("/api/update/install")
+def update_install():
+    """Télécharge et lance l'installeur de la dernière version."""
+    info = updater.check_for_update()
+    if not info.get("update_available") or not info.get("download_url"):
+        raise HTTPException(400, "Aucune mise à jour disponible")
+    updater.start_update(info["download_url"], info["latest"])
+    return {"started": True}
+
+
+@app.get("/api/update/progress")
+def update_progress():
+    return updater.progress()
 
 
 # Servir le front (doit être monté en dernier pour ne pas masquer /api)

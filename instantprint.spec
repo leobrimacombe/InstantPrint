@@ -31,7 +31,7 @@ for pkg in (
 # uvicorn/fastapi chargent des sous-modules dynamiquement -> imports cachés.
 hiddenimports += collect_submodules("uvicorn")
 hiddenimports += collect_submodules("fastapi")
-hiddenimports += ["main", "repair", "anyio", "multipart"]
+hiddenimports += ["main", "repair", "updater", "version", "anyio", "multipart"]
 
 # Nos propres fichiers : le frontend et le code backend.
 datas += [

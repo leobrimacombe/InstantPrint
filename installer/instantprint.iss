@@ -11,6 +11,12 @@
 
 [Setup]
 AppId={{B7E4B0F2-4A2E-4C9A-9D3F-1A2B3C4D5E6F}
+; Mutex de l'app (doit correspondre à APP_MUTEX dans desktop.py) : permet à
+; l'installeur de détecter/fermer l'app lors d'une mise à jour.
+AppMutex=InstantPrint_SingleInstance
+; Restart Manager : ferme l'app en cours puis la relance après installation.
+CloseApplications=yes
+RestartApplications=yes
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}

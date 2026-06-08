@@ -26,6 +26,23 @@ import webview
 from main import app
 
 
+# Mutex nommé : permet à l'installeur (Inno Setup, réglage AppMutex) de détecter
+# que l'app tourne, de la fermer pour la mise à jour, puis de la relancer.
+# Doit correspondre exactement à AppMutex dans installer/instantprint.iss.
+APP_MUTEX = "InstantPrint_SingleInstance"
+
+
+def claim_mutex() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        # Handle volontairement non fermé : le mutex vit tant que le process vit.
+        ctypes.windll.kernel32.CreateMutexW(None, False, APP_MUTEX)
+    except Exception:
+        pass
+
+
 def find_free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
@@ -53,6 +70,7 @@ def wait_for_server(port: int, timeout: float = 60.0) -> bool:
 
 
 def main() -> None:
+    claim_mutex()
     threading.Thread(target=run_server, daemon=True).start()
     wait_for_server(PORT)
     webview.create_window(
