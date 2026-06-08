@@ -148,6 +148,24 @@
   .upd-prog{display:none;position:absolute;left:0;bottom:0;height:3px;width:100%;background:#33363d}
   .upd-prog.show{display:block}
   .upd-bar{height:100%;width:0;background:var(--ok);transition:width .3s}
+
+  /* viewers 3D */
+  .vtools{display:flex;gap:18px;align-items:center;margin-bottom:12px;
+    font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .vtools label{display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
+  .vtools input{accent-color:var(--acc)}
+  .vtools .hint{margin-left:auto;opacity:.7}
+  .viewers{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+  @media(max-width:640px){.viewers{grid-template-columns:1fr}}
+  .viewer{position:relative;background:var(--panel2);border:1px solid var(--line);
+    border-radius:11px;overflow:hidden;height:300px}
+  .viewer.after{border-color:var(--acc)}
+  .viewer canvas{display:block;width:100%;height:100%;cursor:grab}
+  .viewer canvas:active{cursor:grabbing}
+  .vlabel{position:absolute;top:8px;left:10px;z-index:2;font-family:var(--mono);
+    font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;
+    background:rgba(0,0,0,.35);padding:2px 7px;border-radius:5px}
+  .viewer.after .vlabel{color:var(--acc)}
 </style>
 </head>
 <body>
@@ -205,6 +223,15 @@
   <div class="card" id="result">
     <span class="card-n">04 · RÉSULTAT</span>
     <div class="verdict" id="verdict"></div>
+    <div class="vtools">
+      <label><input type="checkbox" id="wire"> Fil de fer</label>
+      <label><input type="checkbox" id="spin" checked> Rotation auto</label>
+      <span class="hint">glisser = tourner · molette = zoom</span>
+    </div>
+    <div class="viewers">
+      <div class="viewer"><span class="vlabel">Avant</span><canvas id="view-before"></canvas></div>
+      <div class="viewer after"><span class="vlabel">Après</span><canvas id="view-after"></canvas></div>
+    </div>
     <div class="cmp">
       <div class="col"><h3>Avant</h3><div id="before"></div></div>
       <div class="arrow">→</div>
@@ -216,9 +243,61 @@
   <footer>fait tourner localement · python + fastapi · aucun upload externe</footer>
 </div>
 
+<script src="/vendor/three.min.js"></script>
+<script src="/vendor/STLLoader.js"></script>
+<script src="/vendor/OrbitControls.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let selectedFile = null, selectedMethod = null, methodData = {};
+
+// ---------- viewer 3D (three.js) ----------
+function createViewer(canvas, color){
+  const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  renderer.setPixelRatio(window.devicePixelRatio||1);
+  const scene=new THREE.Scene(); scene.background=new THREE.Color(0x1d2026);
+  const camera=new THREE.PerspectiveCamera(45,1,0.01,1e7);
+  const controls=new THREE.OrbitControls(camera,canvas);
+  controls.enableDamping=true; controls.autoRotateSpeed=2.2;
+  scene.add(new THREE.AmbientLight(0xffffff,0.6));
+  const k=new THREE.DirectionalLight(0xffffff,0.9); k.position.set(1,1.2,1); scene.add(k);
+  const f=new THREE.DirectionalLight(0xffffff,0.35); f.position.set(-1,-0.6,-1); scene.add(f);
+  const mat=new THREE.MeshStandardMaterial({color,metalness:0.15,roughness:0.6,flatShading:true});
+  let mesh=null;
+  function tick(){
+    const w=canvas.clientWidth,h=canvas.clientHeight;
+    if(w&&h&&(canvas.width!==w||canvas.height!==h)){renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+    controls.update(); renderer.render(scene,camera); requestAnimationFrame(tick);
+  }
+  tick();
+  function fit(g){
+    g.computeBoundingBox(); const bb=g.boundingBox;
+    const c=new THREE.Vector3(); bb.getCenter(c);
+    const s=new THREE.Vector3(); bb.getSize(s);
+    const d=Math.max(s.x,s.y,s.z)||1;
+    controls.target.copy(c);
+    camera.position.set(c.x+d*0.9,c.y+d*0.7,c.z+d*1.3);
+    camera.near=d/200; camera.far=d*200; camera.updateProjectionMatrix(); controls.update();
+  }
+  return {
+    load(url){
+      new THREE.STLLoader().load(url,g=>{
+        if(mesh){scene.remove(mesh);mesh.geometry.dispose();}
+        g.computeVertexNormals();
+        mesh=new THREE.Mesh(g,mat); scene.add(mesh); fit(g);
+      });
+    },
+    setWire(on){mat.wireframe=on;},
+    setSpin(on){controls.autoRotate=on;}
+  };
+}
+let viewBefore=null, viewAfter=null;
+function ensureViewers(){
+  if(viewBefore) return;
+  viewBefore=createViewer($('#view-before'),0x9aa0ad);
+  viewAfter =createViewer($('#view-after'), 0xff5e1a);
+  $('#wire').onchange=e=>{viewBefore.setWire(e.target.checked);viewAfter.setWire(e.target.checked);};
+  $('#spin').onchange=e=>{viewBefore.setSpin(e.target.checked);viewAfter.setSpin(e.target.checked);};
+}
 
 // --- charge les méthodes depuis l'API ---
 fetch('/api/methods').then(r=>r.json()).then(data=>{
@@ -321,12 +400,17 @@ function showResult(d){
     v.innerHTML='✓ &nbsp;Modèle étanche — prêt pour le slicer';
   }else{
     v.className='verdict warn';
-    v.innerHTML='⚠ &nbsp;Pas encore 100% étanche — essaie la méthode <b style="margin:0 4px">Voxel Remesh</b> pour un résultat garanti';
+    v.innerHTML='⚠ &nbsp;Pas encore 100% étanche — essaie <b style="margin:0 4px">Voxel — Solide</b> en augmentant la finesse';
   }
   $('#dl').dataset.job=d.job;
   $('#dl').dataset.url=d.download_url;
   $('#dl').textContent='↓ Télécharger le STL réparé';
   $('#result').classList.add('show');
+  // viewers 3D : on initialise après l'affichage (canvas dimensionnés)
+  ensureViewers();
+  viewBefore.setSpin($('#spin').checked); viewAfter.setSpin($('#spin').checked);
+  viewBefore.load(d.preview_before_url);
+  viewAfter.load(d.preview_after_url);
   $('#result').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 

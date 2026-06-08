@@ -24,7 +24,7 @@ sys.path.insert(0, str(BACKEND))
 import shutil
 import uvicorn
 import webview
-import main
+import main as backend_main   # alias : sinon la fonction main() ci-dessous l'écrase
 from main import app
 
 
@@ -37,7 +37,7 @@ class Api:
     """
 
     def save_repaired(self, job: str) -> dict:
-        src = main._JOBS.get(job)
+        src = backend_main._JOBS.get(job)
         if not src or not Path(src).exists():
             return {"ok": False, "error": "Résultat introuvable ou expiré"}
         window = webview.active_window()

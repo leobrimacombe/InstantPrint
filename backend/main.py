@@ -25,7 +25,20 @@ ALLOWED = {".stl", ".obj", ".ply", ".glb", ".gltf", ".off", ".3mf", ".dae"}
 # Dossier temporaire pour les résultats (token -> chemin)
 WORK = Path(tempfile.gettempdir()) / "instantprint_jobs"
 WORK.mkdir(exist_ok=True)
-_JOBS: dict[str, Path] = {}
+_JOBS: dict[str, Path] = {}        # job -> STL réparé (téléchargeable)
+_PREVIEWS: dict[str, Path] = {}    # job -> STL "avant" (pour le viewer 3D)
+
+
+def _write_preview(mesh, path: Path, cap: int = 400000) -> None:
+    """Écrit un STL d'aperçu. Décime si le maillage est énorme pour garder
+    le viewer 3D fluide (n'affecte que l'aperçu, pas le fichier réparé)."""
+    pv = mesh
+    if len(mesh.faces) > cap:
+        try:
+            pv = mesh.simplify_quadric_decimation(face_count=cap)
+        except Exception:
+            pv = mesh
+    pv.export(str(path))
 
 # En mode normal le front est dans ../frontend ; une fois empaqueté par
 # PyInstaller il est extrait dans sys._MEIPASS/frontend.
@@ -48,7 +61,8 @@ def list_methods():
 async def do_repair(
     file: UploadFile = File(...),
     method: str = Form(...),
-    pitch_ratio: float = Form(0.015),
+    pitch_ratio: float = Form(0.01),
+    depth: int = Form(9),
 ):
     if method not in repair.METHODS:
         raise HTTPException(400, f"Méthode inconnue : {method}")
@@ -62,20 +76,24 @@ async def do_repair(
     in_path = WORK / f"{job}_in{ext}"
     in_path.write_bytes(await file.read())
 
-    # Stats AVANT
+    # Stats AVANT + aperçu 3D du modèle d'origine
     try:
-        before = repair.stats(repair._load(str(in_path)))
+        before_mesh = repair._load(str(in_path))
+        before = repair.stats(before_mesh)
+        prev_path = WORK / f"{job}_before.stl"
+        _write_preview(before_mesh, prev_path)
+        _PREVIEWS[job] = prev_path
     except Exception as e:
         in_path.unlink(missing_ok=True)
         raise HTTPException(400, f"Impossible de lire le modèle : {e}")
 
-    # Réparer
-    fn = repair.METHODS[method]["fn"]
+    # Réparer — on ne passe que les paramètres déclarés par la méthode choisie
+    spec = repair.METHODS[method]
+    available = {"pitch_ratio": pitch_ratio, "depth": depth}
+    kwargs = {p["name"]: available[p["name"]]
+              for p in spec["params"] if p["name"] in available}
     try:
-        if method == "voxel":
-            result = fn(str(in_path), pitch_ratio=pitch_ratio)
-        else:
-            result = fn(str(in_path))
+        result = spec["fn"](str(in_path), **kwargs)
     except Exception as e:
         in_path.unlink(missing_ok=True)
         raise HTTPException(500, f"Échec de la réparation : {e}")
@@ -94,7 +112,18 @@ async def do_repair(
         "before": before,
         "after": after,
         "download_url": f"/api/download/{job}",
+        "preview_before_url": f"/api/preview/{job}",
+        "preview_after_url": f"/api/download/{job}",
     })
+
+
+@app.get("/api/preview/{job}")
+def preview(job: str):
+    """STL du modèle d'origine, servi en ligne pour le viewer 3D."""
+    path = _PREVIEWS.get(job)
+    if not path or not path.exists():
+        raise HTTPException(404, "Aperçu introuvable ou expiré")
+    return FileResponse(str(path), media_type="model/stl")
 
 
 @app.get("/api/download/{job}")
