@@ -185,7 +185,7 @@
 
   <header>
     <h1>Instant<b>Print</b></h1>
-    <span class="tag">v1.0 · trimesh · pymeshlab</span>
+    <span class="tag" id="ver">trimesh · pymeshlab</span>
   </header>
   <p class="sub">
     Dépose un modèle 3D, choisis une méthode de réparation, et récupère un <code>.stl</code>
@@ -440,6 +440,11 @@ $('#dl').onclick=async(e)=>{
     setTimeout(()=>URL.revokeObjectURL(a.href),4000);
   }catch(err){ alert('Échec du téléchargement : '+err.message); }
 };
+
+// --- version affichée dans l'en-tête ---
+fetch('/api/version').then(r=>r.json()).then(v=>{
+  $('#ver').textContent='v'+v.version+' · trimesh · pymeshlab';
+}).catch(()=>{});
 
 // --- mises à jour ---
 async function checkUpdate(){
