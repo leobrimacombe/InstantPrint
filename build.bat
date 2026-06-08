@@ -18,13 +18,13 @@ python -m pip install -q -r build-requirements.txt
 
 echo.
 echo == [1/2] Empaquetage avec PyInstaller...
-pyinstaller mesh-repair.spec --noconfirm
+pyinstaller instantprint.spec --noconfirm
 if errorlevel 1 (
   echo !! Echec de PyInstaller.
   pause
   exit /b 1
 )
-echo    -> dist\MeshRepair\MeshRepair.exe
+echo    -> dist\InstantPrint\InstantPrint.exe
 
 echo.
 echo == [2/2] Construction de l'installeur (Inno Setup)...
@@ -32,11 +32,11 @@ where iscc >nul 2>nul
 if errorlevel 1 (
   echo !! "iscc" introuvable. Installe Inno Setup 6 puis relance,
   echo    ou ajoute C:\Program Files ^(x86^)\Inno Setup 6 au PATH.
-  echo    L'exe est quand meme pret dans dist\MeshRepair\.
+  echo    L'exe est quand meme pret dans dist\InstantPrint\.
   pause
   exit /b 0
 )
-iscc installer\mesh-repair.iss
+iscc installer\instantprint.iss
 if errorlevel 1 (
   echo !! Echec de Inno Setup.
   pause
@@ -45,6 +45,6 @@ if errorlevel 1 (
 
 echo.
 echo == Termine.
-echo    Application portable : dist\MeshRepair\MeshRepair.exe
-echo    Installeur          : installer\Output\MeshRepair-Setup.exe
+echo    Application portable : dist\InstantPrint\InstantPrint.exe
+echo    Installeur          : installer\Output\InstantPrint-Setup.exe
 pause

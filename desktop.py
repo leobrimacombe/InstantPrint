@@ -1,11 +1,11 @@
 """
-Lanceur de l'application desktop Mesh Repair.
+Lanceur de l'application desktop InstantPrint.
 
 Démarre le serveur FastAPI sur un port local libre dans un thread de fond,
 attend qu'il réponde, puis affiche le frontend dans une fenêtre native
 (WebView2 sur Windows). Aucune console, aucun navigateur.
 
-C'est ce fichier qui est empaqueté en .exe par PyInstaller (voir mesh-repair.spec).
+C'est ce fichier qui est empaqueté en .exe par PyInstaller (voir instantprint.spec).
 """
 import sys
 import time
@@ -56,7 +56,7 @@ def main() -> None:
     threading.Thread(target=run_server, daemon=True).start()
     wait_for_server(PORT)
     webview.create_window(
-        "Mesh Repair",
+        "InstantPrint",
         f"http://127.0.0.1:{PORT}",
         width=1200,
         height=850,

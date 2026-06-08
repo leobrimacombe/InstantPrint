@@ -15,13 +15,13 @@ from fastapi.staticfiles import StaticFiles
 
 import repair
 
-app = FastAPI(title="Mesh Repair")
+app = FastAPI(title="InstantPrint")
 
 # Formats lisibles par trimesh
 ALLOWED = {".stl", ".obj", ".ply", ".glb", ".gltf", ".off", ".3mf", ".dae"}
 
 # Dossier temporaire pour les résultats (token -> chemin)
-WORK = Path(tempfile.gettempdir()) / "mesh_repair_jobs"
+WORK = Path(tempfile.gettempdir()) / "instantprint_jobs"
 WORK.mkdir(exist_ok=True)
 _JOBS: dict[str, Path] = {}
 

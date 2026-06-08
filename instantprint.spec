@@ -1,13 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Spec PyInstaller pour Mesh Repair.
+Spec PyInstaller pour InstantPrint.
 
 Construit un .exe windowed (sans console) en mode "one-folder" sous
-dist/MeshRepair/. Le mode one-folder est volontaire : pymeshlab embarque
+dist/InstantPrint/. Le mode one-folder est volontaire : pymeshlab embarque
 beaucoup de DLL et de plugins, et le démarrage est nettement plus rapide
 qu'en one-file (pas de ré-extraction à chaque lancement).
 
-    pyinstaller mesh-repair.spec --noconfirm
+    pyinstaller instantprint.spec --noconfirm
 """
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -59,7 +59,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="MeshRepair",
+    name="InstantPrint",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -75,5 +75,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="MeshRepair",
+    name="InstantPrint",
 )

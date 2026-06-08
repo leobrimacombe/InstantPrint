@@ -1,4 +1,4 @@
-# MESH//REPAIR 🛠️
+# InstantPrint 🛠️
 
 Petite app web locale pour rendre un modèle 3D **imprimable**.
 Tu déposes ton fichier, tu choisis une méthode de réparation, ça tourne tout seul,
@@ -64,7 +64,7 @@ résolution = plus de détails mais plus de faces).
 ## 🗂️ Structure
 
 ```
-mesh-repair/
+instantprint/
 ├── backend/
 │   ├── main.py        # API FastAPI (upload / repair / download)
 │   └── repair.py      # les 4 méthodes de réparation (testées)
