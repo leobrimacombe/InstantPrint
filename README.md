@@ -1,6 +1,6 @@
 # InstantPrint 🛠️
 
-Petite app web locale pour rendre un modèle 3D **imprimable**.
+Application de bureau (Windows) pour rendre un modèle 3D **imprimable**.
 Tu déposes ton fichier, tu choisis une méthode de réparation, ça tourne tout seul,
 et tu récupères un `.stl` prêt pour le slicer.
 
@@ -13,28 +13,19 @@ géométrie non-manifold, surfaces ouvertes.
 
 ## 🚀 Lancement
 
-### Windows
+InstantPrint est une **application de bureau** : une fenêtre native, pas un site.
+
+### Utilisateur final
+Installe via **`InstantPrint-Setup.exe`** (voir [PACKAGING.md](PACKAGING.md)), puis
+lance InstantPrint depuis le menu Démarrer.
+
+### Développement (lancer depuis le code source)
 Double-clique sur **`run.bat`** (ou en terminal : `run.bat`).
+Ça crée le venv, installe les dépendances et ouvre directement la fenêtre de l'app.
 
-### Linux / macOS
-```bash
-chmod +x run.sh
-./run.sh
-```
-
-Puis ouvre **http://127.0.0.1:8000** dans ton navigateur.
-
-> Le script crée un venv, installe les dépendances et démarre le serveur.
 > La 1ʳᵉ fois ça prend 1-2 min (téléchargement de pymeshlab notamment).
 
-### Lancement manuel (si tu préfères)
-```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cd backend
-python main.py
-```
+Pour construire l'exe distribuable, voir **`build.bat`** et [PACKAGING.md](PACKAGING.md).
 
 ---
 
@@ -65,14 +56,21 @@ résolution = plus de détails mais plus de faces).
 
 ```
 instantprint/
+├── desktop.py         # lanceur de l'app : fenêtre native + serveur interne
 ├── backend/
-│   ├── main.py        # API FastAPI (upload / repair / download)
-│   └── repair.py      # les 4 méthodes de réparation (testées)
+│   ├── main.py        # API interne (upload / repair / download / update)
+│   ├── repair.py      # les 4 méthodes de réparation (testées)
+│   ├── updater.py     # mises à jour auto via GitHub Releases
+│   └── version.py     # numéro de version (source unique)
 ├── frontend/
-│   └── index.html     # UI (vanilla, pas de build)
+│   └── index.html     # interface (HTML/CSS/JS, pas de build)
+├── instantprint.spec  # recette PyInstaller (.exe)
+├── installer/         # recette Inno Setup (setup.exe) + icône
 ├── requirements.txt
-├── run.sh / run.bat
-└── README.md
+├── run.bat            # lancer l'app en dev
+└── build.bat          # construire l'exe + l'installeur
 ```
 
-Tout tourne en local, aucun fichier n'est envoyé sur internet.
+L'interface est du HTML servi **en local** par un serveur interne à l'app —
+l'utilisateur ne voit qu'une fenêtre. Aucune donnée n'est envoyée sur internet
+(seule la vérification de mise à jour interroge GitHub).

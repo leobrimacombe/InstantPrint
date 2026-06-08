@@ -1,4 +1,9 @@
 @echo off
+REM ==========================================================================
+REM  Lance InstantPrint en mode developpement : la vraie fenetre application
+REM  (WebView2), depuis le code source, sans avoir a reconstruire l'exe.
+REM  Pour produire l'exe distribuable, utilise build.bat.
+REM ==========================================================================
 cd /d "%~dp0"
 
 if not exist ".venv" (
@@ -11,7 +16,5 @@ echo == Installation des dependances...
 python -m pip install -q --upgrade pip
 python -m pip install -q -r requirements.txt
 
-echo == Demarrage du serveur sur http://127.0.0.1:8000
-cd backend
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-pause
+echo == Lancement de l'application InstantPrint...
+python desktop.py

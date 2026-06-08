@@ -323,10 +323,39 @@ function showResult(d){
     v.className='verdict warn';
     v.innerHTML='⚠ &nbsp;Pas encore 100% étanche — essaie la méthode <b style="margin:0 4px">Voxel Remesh</b> pour un résultat garanti';
   }
-  $('#dl').href=d.download_url;
+  $('#dl').dataset.job=d.job;
+  $('#dl').dataset.url=d.download_url;
+  $('#dl').textContent='↓ Télécharger le STL réparé';
   $('#result').classList.add('show');
   $('#result').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
+
+// Téléchargement : sauvegarde native dans l'app desktop (WebView2 bloque les
+// liens), sinon téléchargement blob classique dans un navigateur.
+$('#dl').onclick=async(e)=>{
+  e.preventDefault();
+  const dl=$('#dl'), job=dl.dataset.job, url=dl.dataset.url;
+  if(!url) return;
+  const api=window.pywebview&&window.pywebview.api&&window.pywebview.api.save_repaired;
+  if(api){
+    const old=dl.textContent; dl.textContent='Enregistrement…';
+    try{
+      const r=await window.pywebview.api.save_repaired(job);
+      if(r&&r.ok) dl.textContent='✓ Enregistré';
+      else if(r&&r.cancelled) dl.textContent=old;
+      else { dl.textContent='⚠ '+((r&&r.error)||'échec'); }
+    }catch(err){ dl.textContent='⚠ '+err.message; }
+    return;
+  }
+  // navigateur
+  try{
+    const blob=await(await fetch(url)).blob();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='modele_repare.stl';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  }catch(err){ alert('Échec du téléchargement : '+err.message); }
+};
 
 // --- mises à jour ---
 async function checkUpdate(){

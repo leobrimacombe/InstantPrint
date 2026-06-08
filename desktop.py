@@ -21,9 +21,39 @@ else:
     BACKEND = Path(__file__).parent / "backend"
 sys.path.insert(0, str(BACKEND))
 
+import shutil
 import uvicorn
 import webview
+import main
 from main import app
+
+
+class Api:
+    """API native exposée au frontend (window.pywebview.api).
+
+    Dans la fenêtre WebView2, les téléchargements par lien <a> sont bloqués :
+    on passe donc par une vraie boîte de dialogue « Enregistrer sous » + copie
+    du fichier produit par le backend.
+    """
+
+    def save_repaired(self, job: str) -> dict:
+        src = main._JOBS.get(job)
+        if not src or not Path(src).exists():
+            return {"ok": False, "error": "Résultat introuvable ou expiré"}
+        window = webview.active_window()
+        chosen = window.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename="modele_repare.stl",
+            file_types=("Fichier STL (*.stl)", "Tous les fichiers (*.*)"),
+        )
+        if not chosen:
+            return {"ok": False, "cancelled": True}
+        dest = chosen if isinstance(chosen, str) else chosen[0]
+        try:
+            shutil.copyfile(src, dest)
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "path": dest}
 
 
 # Mutex nommé : permet à l'installeur (Inno Setup, réglage AppMutex) de détecter
@@ -76,6 +106,7 @@ def main() -> None:
     webview.create_window(
         "InstantPrint",
         f"http://127.0.0.1:{PORT}",
+        js_api=Api(),
         width=1200,
         height=850,
         min_size=(820, 600),
