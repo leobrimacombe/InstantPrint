@@ -28,15 +28,32 @@ echo    -> dist\InstantPrint\InstantPrint.exe
 
 echo.
 echo == [2/2] Construction de l'installeur (Inno Setup)...
-where iscc >nul 2>nul
-if errorlevel 1 (
-  echo !! "iscc" introuvable. Installe Inno Setup 6 puis relance,
-  echo    ou ajoute C:\Program Files ^(x86^)\Inno Setup 6 au PATH.
-  echo    L'exe est quand meme pret dans dist\InstantPrint\.
+REM  Cherche ISCC.exe : d'abord dans le PATH, sinon aux emplacements connus
+REM  (installation par-utilisateur via winget, ou Program Files).
+set "ISCC="
+where iscc >nul 2>nul && set "ISCC=iscc"
+if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC (
+  echo == Inno Setup absent : tentative d'installation automatique via winget...
+  where winget >nul 2>nul
+  if errorlevel 1 (
+    echo !! winget introuvable. Installe Inno Setup 6 manuellement : https://jrsoftware.org/isdl.php
+    echo    L'exe portable reste pret dans dist\InstantPrint\.
+    pause
+    exit /b 0
+  )
+  winget install --id JRSoftware.InnoSetup --accept-source-agreements --accept-package-agreements --silent
+  if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+  if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+)
+if not defined ISCC (
+  echo !! Inno Setup toujours introuvable. L'exe portable reste pret dans dist\InstantPrint\.
   pause
   exit /b 0
 )
-iscc installer\instantprint.iss
+"%ISCC%" installer\instantprint.iss
 if errorlevel 1 (
   echo !! Echec de Inno Setup.
   pause
