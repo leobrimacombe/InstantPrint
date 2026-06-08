@@ -1,0 +1,69 @@
+"""
+Lanceur de l'application desktop Mesh Repair.
+
+Démarre le serveur FastAPI sur un port local libre dans un thread de fond,
+attend qu'il réponde, puis affiche le frontend dans une fenêtre native
+(WebView2 sur Windows). Aucune console, aucun navigateur.
+
+C'est ce fichier qui est empaqueté en .exe par PyInstaller (voir mesh-repair.spec).
+"""
+import sys
+import time
+import socket
+import threading
+from pathlib import Path
+
+# Rendre les modules du backend importables (main.py, repair.py),
+# aussi bien en dev qu'une fois empaqueté.
+if getattr(sys, "frozen", False):
+    BACKEND = Path(sys._MEIPASS) / "backend"
+else:
+    BACKEND = Path(__file__).parent / "backend"
+sys.path.insert(0, str(BACKEND))
+
+import uvicorn
+import webview
+from main import app
+
+
+def find_free_port() -> int:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+PORT = find_free_port()
+
+
+def run_server() -> None:
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+
+
+def wait_for_server(port: int, timeout: float = 60.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.2)
+    return False
+
+
+def main() -> None:
+    threading.Thread(target=run_server, daemon=True).start()
+    wait_for_server(PORT)
+    webview.create_window(
+        "Mesh Repair",
+        f"http://127.0.0.1:{PORT}",
+        width=1200,
+        height=850,
+        min_size=(820, 600),
+    )
+    webview.start()
+
+
+if __name__ == "__main__":
+    main()

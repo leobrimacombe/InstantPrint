@@ -1,0 +1,3 @@
+# Outils nécessaires uniquement pour construire le .exe (pas au runtime).
+# pip install -r build-requirements.txt
+pyinstaller>=6.4

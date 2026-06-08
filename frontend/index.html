@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MESH//REPAIR — réparation 3D imprimable</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0e0f12; --panel:#16181d; --panel2:#1d2026;
+    --line:#2a2e37; --ink:#e9eaed; --muted:#8a8f9c;
+    --acc:#ff5e1a;        /* orange buse chauffée */
+    --acc2:#ffb000;
+    --ok:#3ddc84; --bad:#ff4d5e;
+    --mono:'Space Mono',monospace; --sans:'Archivo',sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    background-image:
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:38px 38px;
+    background-position:center;
+    min-height:100vh;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(circle at 50% -10%,rgba(255,94,26,.10),transparent 55%);
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:48px 20px 80px;position:relative}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:clamp(34px,6vw,58px);font-weight:800;letter-spacing:-2px;margin:0;line-height:.95}
+  h1 b{color:var(--acc)}
+  .tag{font-family:var(--mono);color:var(--muted);font-size:13px}
+  .sub{color:var(--muted);max-width:620px;margin:14px 0 34px;line-height:1.5}
+  .sub code{font-family:var(--mono);color:var(--acc2);font-size:.9em}
+
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:24px;margin-bottom:22px;position:relative;
+  }
+  .card-n{
+    position:absolute;top:-11px;left:20px;background:var(--bg);
+    font-family:var(--mono);font-size:12px;color:var(--acc);
+    padding:0 9px;letter-spacing:1px;
+  }
+  .card h2{font-size:17px;margin:0 0 16px;font-weight:600;letter-spacing:-.3px}
+
+  /* dropzone */
+  #drop{
+    border:2px dashed var(--line);border-radius:12px;padding:40px 20px;
+    text-align:center;cursor:pointer;transition:.18s;background:var(--panel2);
+  }
+  #drop:hover,#drop.over{border-color:var(--acc);background:#201a17}
+  #drop.has{border-style:solid;border-color:var(--acc)}
+  #drop .ic{font-family:var(--mono);font-size:30px;color:var(--acc);margin-bottom:10px}
+  #drop .big{font-size:16px;font-weight:600}
+  #drop .small{color:var(--muted);font-size:13px;margin-top:6px;font-family:var(--mono)}
+  #fname{color:var(--acc2);font-weight:700;font-family:var(--mono);word-break:break-all}
+
+  /* methods */
+  .methods{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:640px){.methods{grid-template-columns:1fr}}
+  .m{
+    border:1px solid var(--line);border-radius:11px;padding:15px 16px;cursor:pointer;
+    transition:.15s;background:var(--panel2);
+  }
+  .m:hover{border-color:#3a3f4a}
+  .m.sel{border-color:var(--acc);background:#201a17;box-shadow:0 0 0 1px var(--acc) inset}
+  .m .ml{font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .m .md{color:var(--muted);font-size:12.5px;line-height:1.45;margin-top:6px}
+  .dot{width:9px;height:9px;border-radius:50%;border:1px solid var(--muted)}
+  .m.sel .dot{background:var(--acc);border-color:var(--acc)}
+
+  /* params */
+  #params{margin-top:16px;display:none}
+  #params.show{display:block}
+  .param{display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:13px}
+  .param .row{display:flex;justify-content:space-between;color:var(--muted)}
+  .param b{color:var(--acc2)}
+  input[type=range]{accent-color:var(--acc);width:100%}
+
+  /* run button */
+  #run{
+    width:100%;border:none;border-radius:11px;padding:17px;cursor:pointer;
+    background:var(--acc);color:#160a04;font-weight:800;font-size:16px;
+    font-family:var(--sans);letter-spacing:.3px;transition:.15s;
+  }
+  #run:hover{background:#ff723d}
+  #run:disabled{background:#33363d;color:#71757f;cursor:not-allowed}
+
+  /* result */
+  #result{display:none}
+  #result.show{display:block}
+  .verdict{
+    display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:11px;
+    font-weight:700;margin-bottom:18px;font-size:15px;
+  }
+  .verdict.good{background:rgba(61,220,132,.12);color:var(--ok);border:1px solid rgba(61,220,132,.3)}
+  .verdict.warn{background:rgba(255,176,0,.12);color:var(--acc2);border:1px solid rgba(255,176,0,.3)}
+  .cmp{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch}
+  @media(max-width:640px){.cmp{grid-template-columns:1fr}.arrow{display:none}}
+  .col{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:16px}
+  .col h3{margin:0 0 12px;font-size:12px;font-family:var(--mono);letter-spacing:1px;color:var(--muted);text-transform:uppercase}
+  .col.after h3{color:var(--acc)}
+  .stat{display:flex;justify-content:space-between;font-family:var(--mono);font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .stat:last-child{border:none}
+  .stat .k{color:var(--muted)}
+  .stat .v{font-weight:700}
+  .v.ok{color:var(--ok)} .v.bad{color:var(--bad)}
+  .arrow{display:flex;align-items:center;justify-content:center;color:var(--acc);font-size:24px;font-family:var(--mono)}
+  #dl{
+    display:inline-flex;align-items:center;gap:9px;margin-top:20px;text-decoration:none;
+    background:var(--ok);color:#04130a;font-weight:800;padding:14px 24px;border-radius:11px;
+    font-family:var(--sans);
+  }
+  #dl:hover{filter:brightness(1.08)}
+
+  .err{background:rgba(255,77,94,.12);border:1px solid rgba(255,77,94,.3);color:var(--bad);
+       padding:14px 16px;border-radius:11px;font-family:var(--mono);font-size:13px;display:none}
+  .err.show{display:block}
+
+  .spin{display:inline-block;width:15px;height:15px;border:2px solid #160a04;border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  footer{text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MESH<b>//</b>REPAIR</h1>
+    <span class="tag">v1.0 · trimesh · pymeshlab</span>
+  </header>
+  <p class="sub">
+    Dépose un modèle 3D, choisis une méthode de réparation, et récupère un <code>.stl</code>
+    prêt à imprimer. Pensé pour les assets cassés (rippés de jeu, trous, normales inversées, non-manifold).
+    Formats : <code>STL · OBJ · PLY · GLB · GLTF · OFF · 3MF</code>
+  </p>
+
+  <!-- 1. UPLOAD -->
+  <div class="card">
+    <span class="card-n">01 · MODÈLE</span>
+    <div id="drop">
+      <div class="ic">⌖</div>
+      <div class="big" id="dropText">Glisse ton fichier ici</div>
+      <div class="small">ou clique pour parcourir</div>
+      <input type="file" id="file" accept=".stl,.obj,.ply,.glb,.gltf,.off,.3mf,.dae" hidden>
+    </div>
+  </div>
+
+  <!-- 2. METHODE -->
+  <div class="card">
+    <span class="card-n">02 · MÉTHODE</span>
+    <h2>Comment réparer ?</h2>
+    <div class="methods" id="methods"></div>
+    <div id="params"></div>
+  </div>
+
+  <!-- 3. RUN -->
+  <div class="card">
+    <span class="card-n">03 · LANCER</span>
+    <button id="run" disabled>Charge un modèle d'abord</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <!-- 4. RESULTAT -->
+  <div class="card" id="result">
+    <span class="card-n">04 · RÉSULTAT</span>
+    <div class="verdict" id="verdict"></div>
+    <div class="cmp">
+      <div class="col"><h3>Avant</h3><div id="before"></div></div>
+      <div class="arrow">→</div>
+      <div class="col after"><h3>Après</h3><div id="after"></div></div>
+    </div>
+    <a id="dl" href="#">↓ Télécharger le STL réparé</a>
+  </div>
+
+  <footer>fait tourner localement · python + fastapi · aucun upload externe</footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let selectedFile = null, selectedMethod = null, methodData = {};
+
+// --- charge les méthodes depuis l'API ---
+fetch('/api/methods').then(r=>r.json()).then(data=>{
+  methodData = data;
+  const box = $('#methods');
+  Object.entries(data).forEach(([key,m],i)=>{
+    const el = document.createElement('div');
+    el.className='m'; el.dataset.key=key;
+    el.innerHTML=`<div class="ml">${m.label}<span class="dot"></span></div><div class="md">${m.desc}</div>`;
+    el.onclick=()=>selectMethod(key);
+    box.appendChild(el);
+    if(i===0) selectMethod(key); // sélection par défaut
+  });
+});
+
+function selectMethod(key){
+  selectedMethod=key;
+  document.querySelectorAll('.m').forEach(e=>e.classList.toggle('sel',e.dataset.key===key));
+  // params
+  const p=$('#params'); p.innerHTML=''; p.classList.remove('show');
+  const params=methodData[key].params||[];
+  if(params.length){
+    p.classList.add('show');
+    params.forEach(pr=>{
+      const wrap=document.createElement('div'); wrap.className='param';
+      wrap.innerHTML=`<div class="row"><span>${pr.label}</span><b id="pv_${pr.name}">${pr.default}</b></div>
+        <input type="range" id="pi_${pr.name}" min="${pr.min}" max="${pr.max}" step="${pr.step}" value="${pr.default}">`;
+      p.appendChild(wrap);
+      const inp=wrap.querySelector('input');
+      inp.oninput=()=>$('#pv_'+pr.name).textContent=inp.value;
+    });
+  }
+  updateRun();
+}
+
+// --- dropzone ---
+const drop=$('#drop'), fileInput=$('#file');
+drop.onclick=()=>fileInput.click();
+fileInput.onchange=e=>setFile(e.target.files[0]);
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); });
+
+function setFile(f){
+  selectedFile=f;
+  drop.classList.add('has');
+  $('#dropText').innerHTML=`<span id="fname">${f.name}</span>`;
+  drop.querySelector('.small').textContent=(f.size/1024/1024).toFixed(2)+' MB · clique pour changer';
+  updateRun();
+}
+function updateRun(){
+  const ok=selectedFile&&selectedMethod;
+  const btn=$('#run');
+  btn.disabled=!ok;
+  if(ok) btn.textContent='Réparer le modèle ⌖';
+  else if(!selectedFile) btn.textContent="Charge un modèle d'abord";
+}
+
+// --- lancer la réparation ---
+$('#run').onclick=async()=>{
+  if(!selectedFile||!selectedMethod) return;
+  const btn=$('#run'), err=$('#err');
+  err.classList.remove('show'); $('#result').classList.remove('show');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Traitement en cours…';
+
+  const fd=new FormData();
+  fd.append('file',selectedFile);
+  fd.append('method',selectedMethod);
+  (methodData[selectedMethod].params||[]).forEach(pr=>{
+    fd.append(pr.name,$('#pi_'+pr.name).value);
+  });
+
+  try{
+    const res=await fetch('/api/repair',{method:'POST',body:fd});
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.detail||'Erreur serveur');
+    showResult(data);
+  }catch(e){
+    err.textContent='⚠ '+e.message; err.classList.add('show');
+  }finally{
+    btn.disabled=false; updateRun();
+  }
+};
+
+function row(k,v,cls=''){return `<div class="stat"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;}
+function statBlock(s){
+  return row('Étanche (imprimable)', s.watertight?'OUI ✓':'NON ✗', s.watertight?'ok':'bad')
+       + row('Solide fermé', s.is_volume?'oui':'non', s.is_volume?'ok':'bad')
+       + row('Faces', s.faces.toLocaleString('fr'))
+       + row('Sommets', s.vertices.toLocaleString('fr'))
+       + row('Dimensions', s.dimensions_mm.map(x=>x.toFixed(1)).join(' × ')+' mm')
+       + row('Volume', s.volume_mm3? (s.volume_mm3/1000).toFixed(1)+' cm³':'—');
+}
+function showResult(d){
+  $('#before').innerHTML=statBlock(d.before);
+  $('#after').innerHTML=statBlock(d.after);
+  const v=$('#verdict');
+  if(d.after.watertight){
+    v.className='verdict good';
+    v.innerHTML='✓ &nbsp;Modèle étanche — prêt pour le slicer';
+  }else{
+    v.className='verdict warn';
+    v.innerHTML='⚠ &nbsp;Pas encore 100% étanche — essaie la méthode <b style="margin:0 4px">Voxel Remesh</b> pour un résultat garanti';
+  }
+  $('#dl').href=d.download_url;
+  $('#result').classList.add('show');
+  $('#result').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+</script>
+</body>
+</html>

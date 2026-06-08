@@ -1,0 +1,21 @@
+# --- Artefacts de build (regeneres par build.bat / pyinstaller) ---
+build/
+dist/
+installer/Output/
+*.spec.bak
+
+# --- Environnement Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# --- Divers OS / IDE ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# --- Config locale Claude Code ---
+.claude/
