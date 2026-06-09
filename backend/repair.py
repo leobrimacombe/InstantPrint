@@ -93,6 +93,13 @@ def winding_remesh(path: str, resolution: int = 300, smooth: float = 1.0,
 
     _p("Lecture du modèle", 3)
     m = _load(path)
+    # CRUCIAL pour les assets rippés : le winding number est SIGNÉ. Avec des
+    # faces orientées n'importe comment, les contributions s'annulent et le
+    # champ ne voit plus l'intérieur (résultat : fragments épars). On rend
+    # l'orientation cohérente par composant, et |champ| plus bas immunise
+    # contre les pièces entièrement retournées.
+    _p("Réorientation des faces", 6)
+    trimesh.repair.fix_winding(m)
     V = np.ascontiguousarray(m.vertices, dtype=np.float64)
     F = np.ascontiguousarray(m.faces, dtype=np.int64)
 
@@ -116,7 +123,7 @@ def winding_remesh(path: str, resolution: int = 300, smooth: float = 1.0,
         _p("Analyse intérieur/extérieur", 10 + int(60 * k / n_chunks))
         W[i:i + chunk] = igl.fast_winding_number(V, F, np.ascontiguousarray(Q[i:i + chunk]))
     del Q
-    field = W.reshape(shape)
+    field = np.abs(W.reshape(shape))
 
     # Lissage du CHAMP (pas du maillage) : le marching cubes interpole alors
     # en sub-voxel -> plus de marches. Les pièces fines sont sûres ici car le

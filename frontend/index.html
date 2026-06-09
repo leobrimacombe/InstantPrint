@@ -157,6 +157,15 @@
   .rprog-txt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     font-family:var(--mono);font-size:12px;font-weight:700;color:#fff;mix-blend-mode:difference}
 
+  /* viewer d'aperçu à l'upload */
+  #inputViewerBox{display:none;margin-top:14px;height:280px}
+  #inputViewerBox.show{display:block}
+  .instat{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:10px;
+    display:none;line-height:1.6}
+  .instat.show{display:block}
+  .instat b{color:var(--acc2)}
+  .instat .ok{color:var(--ok)} .instat .bad{color:var(--bad)}
+
   /* viewers 3D */
   .vtools{display:flex;gap:18px;align-items:center;margin-bottom:12px;
     font-family:var(--mono);font-size:12px;color:var(--muted)}
@@ -210,6 +219,8 @@
       <div class="small">ou clique pour parcourir</div>
       <input type="file" id="file" accept=".stl,.obj,.ply,.glb,.gltf,.off,.3mf,.dae" hidden>
     </div>
+    <div class="viewer" id="inputViewerBox"><span class="vlabel">Aperçu</span><canvas id="view-input"></canvas></div>
+    <div class="instat" id="instat"></div>
   </div>
 
   <!-- 2. METHODE -->
@@ -350,12 +361,38 @@ fileInput.onchange=e=>setFile(e.target.files[0]);
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); });
 
-function setFile(f){
-  selectedFile=f;
+let inputViewer=null, inspectJob=null;
+async function setFile(f){
+  selectedFile=f; inspectJob=null;
   drop.classList.add('has');
   $('#dropText').innerHTML=`<span id="fname">${f.name}</span>`;
-  drop.querySelector('.small').textContent=(f.size/1024/1024).toFixed(2)+' MB · clique pour changer';
+  drop.querySelector('.small').textContent=(f.size/1024/1024).toFixed(2)+' MB · analyse en cours…';
   updateRun();
+
+  // upload immédiat -> aperçu 3D + stats, et le backend garde le fichier
+  // pour la réparation (pas de second upload)
+  const fd=new FormData(); fd.append('file',f);
+  try{
+    const res=await fetch('/api/inspect',{method:'POST',body:fd});
+    const d=await res.json();
+    if(!res.ok) throw new Error(d.detail||'Erreur');
+    inspectJob=d.job;
+    $('#inputViewerBox').classList.add('show');
+    if(!inputViewer) inputViewer=createViewer($('#view-input'),0x9aa0ad);
+    inputViewer.setSpin(true);
+    inputViewer.load(d.preview_url);
+    const s=d.before;
+    $('#instat').innerHTML=
+      `<b>${s.faces.toLocaleString('fr')}</b> faces · `+
+      `<b>${s.dimensions_mm.map(x=>x.toFixed(1)).join(' × ')}</b> mm · `+
+      `étanche : <span class="${s.watertight?'ok':'bad'}">${s.watertight?'OUI ✓':'NON ✗'}</span>`;
+    $('#instat').classList.add('show');
+    drop.querySelector('.small').textContent=(f.size/1024/1024).toFixed(2)+' MB · clique pour changer';
+  }catch(e){
+    drop.querySelector('.small').textContent='⚠ '+e.message;
+    $('#inputViewerBox').classList.remove('show');
+    $('#instat').classList.remove('show');
+  }
 }
 function updateRun(){
   const ok=selectedFile&&selectedMethod;
@@ -394,7 +431,8 @@ $('#run').onclick=async()=>{
   startRepairPoll();
 
   const fd=new FormData();
-  fd.append('file',selectedFile);
+  if(inspectJob) fd.append('job',inspectJob);   // fichier déjà sur le serveur
+  else fd.append('file',selectedFile);
   fd.append('method',selectedMethod);
   (methodData[selectedMethod].params||[]).forEach(pr=>{
     fd.append(pr.name,$('#pi_'+pr.name).value);

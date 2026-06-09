@@ -28,6 +28,7 @@ WORK = Path(tempfile.gettempdir()) / "instantprint_jobs"
 WORK.mkdir(exist_ok=True)
 _JOBS: dict[str, Path] = {}        # job -> STL réparé pleine qualité (téléchargeable)
 _PREVIEWS: dict[str, dict] = {}    # job -> {"before": Path, "after": Path} (viewer 3D, allégé)
+_INPUTS: dict[str, dict] = {}      # job -> {"path": fichier uploadé, "before": stats}
 
 
 def _write_preview(mesh, path: Path, cap: int = 400000) -> None:
@@ -58,9 +59,35 @@ def list_methods():
     }
 
 
+@app.post("/api/inspect")
+async def inspect(file: UploadFile = File(...)):
+    """Analyse le modèle dès l'upload : stats + aperçu 3D immédiat.
+    Le fichier est conservé pour que /api/repair le réutilise (pas de
+    second upload)."""
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED:
+        raise HTTPException(400, f"Format non supporté : {ext}. Acceptés : {sorted(ALLOWED)}")
+    job = uuid.uuid4().hex[:12]
+    in_path = WORK / f"{job}_in{ext}"
+    in_path.write_bytes(await file.read())
+    try:
+        mesh = await run_in_threadpool(repair._load, str(in_path))
+        before = repair.stats(mesh)
+        prev_path = WORK / f"{job}_before.stl"
+        await run_in_threadpool(_write_preview, mesh, prev_path)
+    except Exception as e:
+        in_path.unlink(missing_ok=True)
+        raise HTTPException(400, f"Impossible de lire le modèle : {e}")
+    _PREVIEWS[job] = {"before": prev_path}
+    _INPUTS[job] = {"path": in_path, "before": before}
+    return {"job": job, "before": before,
+            "preview_url": f"/api/preview/{job}/before"}
+
+
 @app.post("/api/repair")
 async def do_repair(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
+    job: str = Form(None),
     method: str = Form(...),
     pitch_ratio: float = Form(0.006),
     smooth: float = Form(1.0),
@@ -71,26 +98,33 @@ async def do_repair(
     if method not in repair.METHODS:
         raise HTTPException(400, f"Méthode inconnue : {method}")
 
-    ext = Path(file.filename or "").suffix.lower()
-    if ext not in ALLOWED:
-        raise HTTPException(400, f"Format non supporté : {ext}. Acceptés : {sorted(ALLOWED)}")
+    if job and job in _INPUTS:
+        # Fichier déjà envoyé via /api/inspect : on le réutilise tel quel.
+        in_path = _INPUTS[job]["path"]
+        before = _INPUTS[job]["before"]
+        from_inspect = True
+    else:
+        if file is None:
+            raise HTTPException(400, "Aucun fichier fourni")
+        ext = Path(file.filename or "").suffix.lower()
+        if ext not in ALLOWED:
+            raise HTTPException(400, f"Format non supporté : {ext}. Acceptés : {sorted(ALLOWED)}")
+        job = uuid.uuid4().hex[:12]
+        in_path = WORK / f"{job}_in{ext}"
+        in_path.write_bytes(await file.read())
+        from_inspect = False
 
-    # Sauver l'upload
-    job = uuid.uuid4().hex[:12]
-    in_path = WORK / f"{job}_in{ext}"
-    in_path.write_bytes(await file.read())
-
-    # Stats AVANT + aperçu 3D du modèle d'origine (hors boucle d'event)
-    try:
-        repair._p("Lecture du modèle", 4)
-        before_mesh = await run_in_threadpool(repair._load, str(in_path))
-        before = repair.stats(before_mesh)
-        prev_path = WORK / f"{job}_before.stl"
-        await run_in_threadpool(_write_preview, before_mesh, prev_path)
-        _PREVIEWS[job] = {"before": prev_path}
-    except Exception as e:
-        in_path.unlink(missing_ok=True)
-        raise HTTPException(400, f"Impossible de lire le modèle : {e}")
+        # Stats AVANT + aperçu 3D du modèle d'origine (hors boucle d'event)
+        try:
+            repair._p("Lecture du modèle", 4)
+            before_mesh = await run_in_threadpool(repair._load, str(in_path))
+            before = repair.stats(before_mesh)
+            prev_path = WORK / f"{job}_before.stl"
+            await run_in_threadpool(_write_preview, before_mesh, prev_path)
+            _PREVIEWS[job] = {"before": prev_path}
+        except Exception as e:
+            in_path.unlink(missing_ok=True)
+            raise HTTPException(400, f"Impossible de lire le modèle : {e}")
 
     # Réparer — on ne passe que les paramètres déclarés par la méthode choisie.
     # Exécuté dans un thread pour que /api/repair/progress reste interrogeable.
@@ -102,7 +136,9 @@ async def do_repair(
     try:
         result = await run_in_threadpool(lambda: spec["fn"](str(in_path), **kwargs))
     except Exception as e:
-        in_path.unlink(missing_ok=True)
+        # fichier issu d'/api/inspect : on le garde pour retenter une autre méthode
+        if not from_inspect:
+            in_path.unlink(missing_ok=True)
         repair._p("Erreur", 0)
         raise HTTPException(500, f"Échec de la réparation : {e}")
 
@@ -118,7 +154,10 @@ async def do_repair(
     _PREVIEWS[job]["after"] = prev_after
 
     _JOBS[job] = out_path
-    in_path.unlink(missing_ok=True)
+    # fichier issu d'/api/inspect : conservé pour relancer une autre méthode
+    # sans re-upload (nettoyé avec le dossier temp par l'OS)
+    if not from_inspect:
+        in_path.unlink(missing_ok=True)
     repair._p("Terminé", 100)
 
     return JSONResponse({
