@@ -371,17 +371,19 @@ def shell_remesh(path: str, resolution: int = 500, close_mm: float = 2.0,
                                     sgn_mask[i:i + step] * np.minimum(d, fp))
     field[bi[:, 0], bi[:, 1], bi[:, 2]] = vals.astype(np.float32)
 
-    # les membranes fines (bouchons d'ouvertures) restent verrouillées côté
-    # solide — protège du bruit d'orientation et du lissage
-    core = ndimage.binary_erosion(solid)
-    thin = solid & ~ndimage.binary_dilation(core)
-    field = np.maximum(field, np.where(thin, 0.1 * pitch, -np.inf).astype(np.float32))
-
-    # lissage OPTIONNEL par-dessus (0 = brut fidèle, recommandé hard-surface)
+    # lissage OPTIONNEL (0 = brut fidèle, recommandé hard-surface)
     if smooth and float(smooth) > 0:
         _p("Lissage du champ", 83)
         field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 1.2))
-        field = np.maximum(field, np.where(thin, 0.1 * pitch, -np.inf).astype(np.float32))
+
+    # VERROU TOPOLOGIQUE : géométrie = champ de distance, topologie = masque.
+    # Chaque cellule solide reste (un peu) positive, chaque cellule vide
+    # (un peu) négative -> la surface vit dans le couloir d'une cellule entre
+    # les deux. Ni le lissage ni le bruit d'orientation des normales ne
+    # peuvent percer de trou ; coût max : un demi-voxel de déviation locale.
+    eps = np.float32(0.05 * pitch)
+    field = np.maximum(field, np.where(solid, eps, np.float32(-np.inf)).astype(np.float32))
+    field = np.minimum(field, np.where(solid, np.float32(np.inf), -eps).astype(np.float32))
 
     _p("Reconstruction de la surface", 86)
     v, faces, _, _ = measure.marching_cubes(field, level=0.0)
