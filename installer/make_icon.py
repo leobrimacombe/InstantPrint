@@ -84,3 +84,8 @@ sizes = [256, 128, 64, 48, 32, 16]
 icons = [img.resize((s, s), Image.LANCZOS) for s in sizes]
 icons[0].save(out, format="ICO", sizes=[(s, s) for s in sizes], append_images=icons[1:])
 print("OK ->", out)
+
+# icône macOS (.icns) pour le bundle .app construit par GitHub Actions
+out_icns = Path(__file__).parent / "app.icns"
+img.save(out_icns, format="ICNS")
+print("OK ->", out_icns)

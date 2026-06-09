@@ -272,14 +272,14 @@ def poisson_repair(path: str, depth: int = 9) -> trimesh.Trimesh:
 #     de trous), marching cubes sub-voxel
 # Tout en scipy/C : nettement plus rapide que le winding number.
 # ---------------------------------------------------------------------------
-def shell_remesh(path: str, resolution: int = 400, close_mm: float = 2.0,
-                 smooth: float = 0.8, max_faces: int = 2000000) -> trimesh.Trimesh:
+def shell_remesh(path: str, resolution: int = 500, close_mm: float = 2.0,
+                 smooth: float = 0.0, max_faces: int = 4000000) -> trimesh.Trimesh:
     from scipy import ndimage
     from skimage import measure
 
     _p("Lecture du modèle", 3)
     m = _load(path)
-    resolution = int(max(64, min(700, resolution)))
+    resolution = int(max(64, min(900, resolution)))
     pitch = float(m.extents.max()) / resolution
     k = int(np.ceil(max(0.0, float(close_mm)) / pitch))
     k = min(k, 15)                       # garde-fou perf
@@ -336,21 +336,55 @@ def shell_remesh(path: str, resolution: int = 400, close_mm: float = 2.0,
         keep = counts >= max(30, int(0.0005 * counts.max()))
         solid = keep[lbl2]
 
-    # lissage avec protection CIBLÉE : seules les zones fines (membranes
-    # <=2 voxels : bouchons d'ouvertures, ailerons) sont verrouillées
-    # au-dessus du seuil. Les surfaces épaisses (coque) gardent le placement
-    # sub-voxel du champ lissé -> pas de marches visibles. (Verrouiller TOUT
-    # le solide recollerait la surface sur la grille = retour des voxels.)
-    field = solid.astype(np.float32)
-    if smooth and float(smooth) > 0:
-        _p("Lissage du champ", 78)
-        field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 1.2))
-        core = ndimage.binary_erosion(solid)
-        thin = solid & ~ndimage.binary_dilation(core)
-        field = np.maximum(field, thin.astype(np.float32) * 0.55)
+    # CHAMP DE DISTANCE EXACT : pour les cellules proches de la frontière,
+    # on mesure la vraie distance à la surface d'origine (igl, C++). Le
+    # marching cubes place alors chaque sommet EXACTEMENT sur la surface
+    # d'origine -> fidélité maximale, arêtes et détails fins préservés
+    # (contrairement à un lissage gaussien qui fond les détails).
+    import igl
+    _p("Champ de distance exact", 74)
+    fp = 2.0 * pitch
+    field = np.where(solid, fp, -fp).astype(np.float32)   # intérieur positif
+    boundary = solid ^ ndimage.binary_erosion(solid)
+    band = ndimage.binary_dilation(boundary, iterations=2)
+    bi = np.argwhere(band)
+    Qb = lo + bi.astype(np.float64) * pitch
+    Vd = np.ascontiguousarray(m.vertices, dtype=np.float64)
+    Fd = np.ascontiguousarray(m.faces, dtype=np.int64)
+    normals = np.asarray(m.face_normals)
+    vals = np.empty(len(Qb))
+    sgn_mask = np.where(solid[band], 1.0, -1.0)   # même ordre C que argwhere
+    step = 4_000_000
+    for i in range(0, len(Qb), step):
+        _p("Champ de distance exact", 74 + int(8 * i / max(1, len(Qb))))
+        Qc = np.ascontiguousarray(Qb[i:i + step])
+        sq, tri, C = igl.point_mesh_squared_distance(Qc, Vd, Fd)
+        d = np.sqrt(np.maximum(sq, 0.0))
+        # Tout près de la surface, le CÔTÉ est donné par la normale du
+        # triangle le plus proche -> placement exact (le masque voxel, lui,
+        # déborde d'un demi-voxel). Plus loin, le masque fait autorité
+        # (bouchons, topologie).
+        side = np.einsum("ij,ij->i", Qc - C, normals[tri])
+        near = d <= 0.75 * pitch
+        s_near = np.where(side >= 0, -1.0, 1.0)   # côté normale = extérieur
+        vals[i:i + step] = np.where(near, s_near * d,
+                                    sgn_mask[i:i + step] * np.minimum(d, fp))
+    field[bi[:, 0], bi[:, 1], bi[:, 2]] = vals.astype(np.float32)
 
-    _p("Reconstruction de la surface", 85)
-    v, faces, _, _ = measure.marching_cubes(field, level=0.5)
+    # les membranes fines (bouchons d'ouvertures) restent verrouillées côté
+    # solide — protège du bruit d'orientation et du lissage
+    core = ndimage.binary_erosion(solid)
+    thin = solid & ~ndimage.binary_dilation(core)
+    field = np.maximum(field, np.where(thin, 0.1 * pitch, -np.inf).astype(np.float32))
+
+    # lissage OPTIONNEL par-dessus (0 = brut fidèle, recommandé hard-surface)
+    if smooth and float(smooth) > 0:
+        _p("Lissage du champ", 83)
+        field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 1.2))
+        field = np.maximum(field, np.where(thin, 0.1 * pitch, -np.inf).astype(np.float32))
+
+    _p("Reconstruction de la surface", 86)
+    v, faces, _, _ = measure.marching_cubes(field, level=0.0)
     # process=False : le marching cubes indexe déjà ses sommets ; la fusion
     # de trimesh créerait des faces orphelines dégénérées (casse l'étanchéité)
     rem = trimesh.Trimesh(v * pitch + lo, faces, process=False)
@@ -415,14 +449,14 @@ METHODS = {
     "shell": {
         "fn": shell_remesh,
         "label": "Coquille — Extérieur fidèle 🚀",
-        "desc": "L'enveloppe extérieure uniquement, fidèle au modèle. Bouche les ouvertures (tuyères, prises d'air), supprime les débris, et le lissage ne peut pas créer de trous. Rapide.",
+        "desc": "L'enveloppe extérieure uniquement, posée EXACTEMENT sur la surface d'origine (champ de distance). Bouche les ouvertures, supprime les débris. Pour imprimer en grand : résolution haute + lissage 0.",
         "params": [
             {"name": "resolution", "label": "Résolution (voxels/axe)",
-             "type": "int", "default": 400, "min": 100, "max": 700, "step": 25},
+             "type": "int", "default": 500, "min": 100, "max": 900, "step": 25},
             {"name": "close_mm", "label": "Bouchage des ouvertures (mm)",
              "type": "float", "default": 2.0, "min": 0, "max": 8, "step": 0.5},
-            {"name": "smooth", "label": "Lissage (sans risque de trous)",
-             "type": "float", "default": 0.8, "min": 0, "max": 1.2, "step": 0.1},
+            {"name": "smooth", "label": "Lissage (0 = brut fidèle)",
+             "type": "float", "default": 0, "min": 0, "max": 1.2, "step": 0.1},
         ],
     },
 }

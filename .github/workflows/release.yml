@@ -1,0 +1,74 @@
+# Release automatique : à chaque tag "v*" poussé (ex. v1.3.0), construit
+# l'app sur Windows ET macOS dans le cloud, puis attache les deux fichiers
+# à la release GitHub. L'auto-updater de l'app détecte ensuite la release.
+#
+# Publier une version :
+#   1. bump la version (backend/version.py + installer/instantprint.iss)
+#   2. git commit + push
+#   3. git tag v1.3.0 && git push origin v1.3.0
+#   -> tout le reste est automatique (onglet Actions pour suivre).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r build-requirements.txt
+
+      - name: PyInstaller
+        run: pyinstaller instantprint.spec --noconfirm
+
+      - name: Inno Setup
+        run: |
+          choco install innosetup -y --no-progress
+          iscc installer\instantprint.iss
+
+      - name: Attacher à la release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/*.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r build-requirements.txt
+
+      - name: PyInstaller (.app)
+        run: pyinstaller instantprint.spec --noconfirm
+
+      - name: Zipper le bundle
+        run: |
+          cd dist
+          zip -ry "InstantPrint-macOS-${GITHUB_REF_NAME#v}.zip" InstantPrint.app
+
+      - name: Attacher à la release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/InstantPrint-macOS-*.zip

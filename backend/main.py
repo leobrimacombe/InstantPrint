@@ -31,7 +31,7 @@ _PREVIEWS: dict[str, dict] = {}    # job -> {"before": Path, "after": Path} (vie
 _INPUTS: dict[str, dict] = {}      # job -> {"path": fichier uploadé, "before": stats}
 
 
-def _write_preview(mesh, path: Path, cap: int = 400000) -> None:
+def _write_preview(mesh, path: Path, cap: int = 1000000) -> None:
     """Écrit un STL d'aperçu. Décime si le maillage est énorme pour garder
     le viewer 3D fluide (n'affecte que l'aperçu, pas le fichier réparé)."""
     pv = mesh

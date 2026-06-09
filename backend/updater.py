@@ -54,6 +54,19 @@ def is_newer(remote: str, local: str) -> bool:
     return _parse(remote) > _parse(local)
 
 
+def _pick_asset(assets: list) -> dict | None:
+    """Choisit l'asset de release adapté à la plateforme courante."""
+    if sys.platform == "darwin":
+        for ext in (".dmg", ".zip"):
+            for a in assets:
+                n = a.get("name", "").lower()
+                if n.endswith(ext) and ("mac" in n or "darwin" in n or ext == ".dmg"):
+                    return a
+        return None
+    return next((a for a in assets
+                 if a.get("name", "").lower().endswith(".exe")), None)
+
+
 def _http_json(url: str, timeout: int = 8) -> dict:
     req = urllib.request.Request(url, headers={
         "User-Agent": "InstantPrint-Updater",
@@ -76,9 +89,7 @@ def check_for_update() -> dict:
         return result
 
     latest = (rel.get("tag_name") or "").lstrip("vV")
-    # On prend le premier asset .exe (l'installeur).
-    asset = next((a for a in rel.get("assets", [])
-                  if a.get("name", "").lower().endswith(".exe")), None)
+    asset = _pick_asset(rel.get("assets", []))
     result.update({
         "latest": latest,
         "notes": rel.get("body") or "",
@@ -115,8 +126,12 @@ def _download(url: str, dest: str) -> None:
 
 
 def _launch_installer(path: str) -> None:
-    """Lance l'installeur en silencieux et se détache pour survivre à la
-    fermeture de l'app par le Restart Manager."""
+    """Windows : lance l'installeur Inno Setup en silencieux (le Restart
+    Manager ferme puis relance l'app). macOS : ouvre le .zip/.dmg téléchargé
+    dans le Finder — l'utilisateur glisse la nouvelle app dans Applications."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path], close_fds=True)
+        return
     flags = ["/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", "/NOCANCEL", "/SP-"]
     creation = 0
     if sys.platform == "win32":
@@ -127,7 +142,8 @@ def _launch_installer(path: str) -> None:
 def _worker(url: str, version: str) -> None:
     try:
         _set(phase="downloading", percent=0, error=None, version=version)
-        dest = os.path.join(tempfile.gettempdir(), f"InstantPrint-Setup-{version}.exe")
+        ext = os.path.splitext(url.split("?")[0])[1] or ".exe"
+        dest = os.path.join(tempfile.gettempdir(), f"InstantPrint-Setup-{version}{ext}")
         _download(url, dest)
         _set(phase="launching", percent=100)
         _launch_installer(dest)

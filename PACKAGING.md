@@ -1,3 +1,18 @@
+# Release automatique Windows + macOS (GitHub Actions)
+
+Le workflow `.github/workflows/release.yml` construit l'app sur des machines
+Windows **et** macOS dans le cloud et attache les fichiers à la release.
+
+Publier une version :
+1. bump la version dans `backend/version.py` ET `installer/instantprint.iss`
+2. `git commit` + `git push`
+3. `git tag v1.3.0` puis `git push origin v1.3.0`
+→ GitHub Actions fait le reste (suivi dans l'onglet **Actions** du repo).
+La release contiendra `InstantPrint-Setup-1.3.0.exe` (Windows) et
+`InstantPrint-macOS-1.3.0.zip` (macOS, app à glisser dans Applications).
+
+Note macOS : app non signée → au premier lancement, clic droit → Ouvrir.
+
 # Construire l'application Windows (.exe + installeur)
 
 On garde 100 % du code Python. On l'emballe en une vraie app de bureau :
