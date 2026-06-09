@@ -93,13 +93,20 @@ def winding_remesh(path: str, resolution: int = 300, smooth: float = 1.0,
 
     _p("Lecture du modèle", 3)
     m = _load(path)
-    # CRUCIAL pour les assets rippés : le winding number est SIGNÉ. Avec des
-    # faces orientées n'importe comment, les contributions s'annulent et le
-    # champ ne voit plus l'intérieur (résultat : fragments épars). On rend
-    # l'orientation cohérente par composant, et |champ| plus bas immunise
-    # contre les pièces entièrement retournées.
-    _p("Réorientation des faces", 6)
-    trimesh.repair.fix_winding(m)
+    # CRUCIAL pour les assets de jeu : le winding number est SIGNÉ et
+    # s'annule si la géométrie est "double-face" (chaque panneau dupliqué
+    # avec winding inversé pour le rendu — très courant dans les rips).
+    # unique_faces déduplique par indices triés -> supprime la copie
+    # retournée et restaure le champ. On retire aussi les faces dégénérées.
+    _p("Nettoyage (doublons, dégénérées)", 5)
+    m.update_faces(m.nondegenerate_faces())
+    m.update_faces(m.unique_faces())
+    m.remove_unreferenced_vertices()
+    # Orientation cohérente par composant (les faces en vrac annulent aussi
+    # le champ) ; |champ| plus bas immunise contre les pièces retournées.
+    if not m.is_winding_consistent:
+        _p("Réorientation des faces", 7)
+        trimesh.repair.fix_winding(m)
     V = np.ascontiguousarray(m.vertices, dtype=np.float64)
     F = np.ascontiguousarray(m.faces, dtype=np.int64)
 
@@ -123,13 +130,34 @@ def winding_remesh(path: str, resolution: int = 300, smooth: float = 1.0,
         _p("Analyse intérieur/extérieur", 10 + int(60 * k / n_chunks))
         W[i:i + chunk] = igl.fast_winding_number(V, F, np.ascontiguousarray(Q[i:i + chunk]))
     del Q
-    field = np.abs(W.reshape(shape))
+    field = np.abs(np.nan_to_num(W.reshape(shape), nan=0.0, posinf=1.0, neginf=1.0))
+
+    # Filet de sécurité : union avec le remplissage voxel sur la même grille.
+    # Si le winding number rate une zone (géométrie pathologique), le voxel
+    # la fournit -> Ultra ne peut jamais être pire que la méthode Voxel.
+    _p("Voxelisation de contrôle", 72)
+    try:
+        vox = m.voxelized(pitch=pitch).fill()
+        mat = vox.matrix
+        origin = np.asarray(vox.transform[:3, 3])
+        off = np.round((lo - origin) / pitch).astype(int)
+        ax_idx, ax_ok = [], []
+        for a in range(3):
+            ix = np.arange(shape[a]) + off[a]
+            ax_ok.append((ix >= 0) & (ix < mat.shape[a]))
+            ax_idx.append(np.clip(ix, 0, mat.shape[a] - 1))
+        occ = mat[np.ix_(*ax_idx)].astype(np.float32)
+        occ *= (ax_ok[0][:, None, None] & ax_ok[1][None, :, None]
+                & ax_ok[2][None, None, :])
+        field = np.maximum(field, occ)
+    except Exception:
+        pass  # le champ winding number seul reste utilisable
 
     # Lissage du CHAMP (pas du maillage) : le marching cubes interpole alors
     # en sub-voxel -> plus de marches. Les pièces fines sont sûres ici car le
     # winding number les remplit en volume (pas une feuille d'1 voxel).
     if smooth and float(smooth) > 0:
-        _p("Lissage du champ", 74)
+        _p("Lissage du champ", 76)
         field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 2.0))
 
     _p("Reconstruction de la surface", 80)
