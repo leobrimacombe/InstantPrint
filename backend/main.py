@@ -62,8 +62,9 @@ def list_methods():
 async def do_repair(
     file: UploadFile = File(...),
     method: str = Form(...),
-    pitch_ratio: float = Form(0.008),
-    smooth: int = Form(8),
+    pitch_ratio: float = Form(0.006),
+    smooth: float = Form(1.0),
+    resolution: int = Form(300),
     depth: int = Form(9),
 ):
     repair._p("Réception du fichier", 1)
@@ -94,7 +95,8 @@ async def do_repair(
     # Réparer — on ne passe que les paramètres déclarés par la méthode choisie.
     # Exécuté dans un thread pour que /api/repair/progress reste interrogeable.
     spec = repair.METHODS[method]
-    available = {"pitch_ratio": pitch_ratio, "smooth": smooth, "depth": depth}
+    available = {"pitch_ratio": pitch_ratio, "smooth": smooth,
+                 "resolution": resolution, "depth": depth}
     kwargs = {p["name"]: available[p["name"]]
               for p in spec["params"] if p["name"] in available}
     try:

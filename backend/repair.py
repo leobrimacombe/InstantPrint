@@ -76,37 +76,82 @@ def _decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
 
 
 # ---------------------------------------------------------------------------
-# METHODE 1 — MESHFIX (FIDÈLE)  ⭐ PRÉSERVE LE DÉTAIL
-# Algorithme de Marco Attene : rend le maillage manifold et étanche en
-# CONSERVANT la géométrie d'origine (bouche les trous, retire les
-# auto-intersections, répare le non-manifold). Aucune perte de résolution,
-# dimensions exactes. Idéal pour les modèles détaillés (vaisseaux SC).
-# Si le modèle est vraiment trop cassé, se rabattre sur le Voxel.
+# METHODE 1 — ULTRA (WINDING NUMBERS)  ⭐ LA MEILLEURE
+# Reconstruction par "fast winding numbers" (Barill et al. 2018 — la techno du
+# remesher de Blender) : pour chaque point d'une grille, un test
+# intérieur/extérieur robuste MÊME sur un mesh troué/cassé, puis marching
+# cubes sur ce champ continu (lissé) -> placement sub-voxel, pas de marches
+# d'escalier. Contrairement au voxel binaire, le remplissage ne "fuit" pas
+# par les trous, et les pièces fines (ailes...) sont préservées en volume.
+# Toujours étanche, dimensions exactes.
 # ---------------------------------------------------------------------------
-def meshfix_repair(path: str, join_parts: int = 0) -> trimesh.Trimesh:
-    import pymeshfix
-    _p("Lecture du modèle", 10)
+def winding_remesh(path: str, resolution: int = 300, smooth: float = 1.0,
+                   max_faces: int = 2000000) -> trimesh.Trimesh:
+    import igl
+    from scipy import ndimage
+    from skimage import measure
+
+    _p("Lecture du modèle", 3)
     m = _load(path)
-    _p("Réparation (MeshFix)", 45)
-    mf = pymeshfix.MeshFix(m.vertices, m.faces)
-    # remove_smallest_components=False : on garde toutes les pièces du modèle.
-    mf.repair(joincomp=bool(join_parts), remove_smallest_components=False)
-    _p("Finalisation", 90)
-    r = trimesh.Trimesh(mf.points, mf.faces, process=True)
-    trimesh.repair.fix_normals(r)
-    return r
+    V = np.ascontiguousarray(m.vertices, dtype=np.float64)
+    F = np.ascontiguousarray(m.faces, dtype=np.int64)
+
+    resolution = int(max(64, min(500, resolution)))
+    pitch = float(m.extents.max()) / resolution
+    pad = 3
+    lo = m.bounds[0] - pad * pitch
+    shape = np.ceil(m.extents / pitch).astype(int) + 2 * pad
+
+    _p("Préparation de la grille", 8)
+    xs = [lo[i] + np.arange(shape[i]) * pitch for i in range(3)]
+    gx, gy, gz = np.meshgrid(*xs, indexing="ij")
+    Q = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
+    del gx, gy, gz
+
+    # Winding number par lots -> progression réelle pendant le gros du calcul.
+    W = np.empty(len(Q))
+    chunk = 2_000_000
+    n_chunks = max(1, -(-len(Q) // chunk))
+    for k, i in enumerate(range(0, len(Q), chunk)):
+        _p("Analyse intérieur/extérieur", 10 + int(60 * k / n_chunks))
+        W[i:i + chunk] = igl.fast_winding_number(V, F, np.ascontiguousarray(Q[i:i + chunk]))
+    del Q
+    field = W.reshape(shape)
+
+    # Lissage du CHAMP (pas du maillage) : le marching cubes interpole alors
+    # en sub-voxel -> plus de marches. Les pièces fines sont sûres ici car le
+    # winding number les remplit en volume (pas une feuille d'1 voxel).
+    if smooth and float(smooth) > 0:
+        _p("Lissage du champ", 74)
+        field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 2.0))
+
+    _p("Reconstruction de la surface", 80)
+    v, faces, _, _ = measure.marching_cubes(field, level=0.5)
+    rem = trimesh.Trimesh(v * pitch + lo, faces, process=True)
+
+    if len(rem.faces) > max_faces:
+        _p("Allègement", 92)
+        dec = _decimate(rem, max_faces)
+        if dec.is_watertight:
+            rem = dec
+    _p("Finalisation", 97)
+    trimesh.repair.fix_normals(rem)
+    return rem
 
 
 # ---------------------------------------------------------------------------
-# METHODE 2 — VOXEL REMESH (SOLIDE)  — LE FILET DE SÉCURITÉ
-# Transforme le modèle en voxels, remplit l'intérieur, reconstruit la surface
-# (marching cubes). Résultat TOUJOURS étanche, aux BONNES dimensions, même sur
-# un asset complètement cassé. Décimation finale qui préserve les arêtes pour
-# rester léger (utile pour les vaisseaux / hard-surface).
-# pitch_ratio bas = plus de détails + plus lent.
+# METHODE 2 — VOXEL REMESH (SOLIDE)
+# Voxelisation binaire + remplissage, puis marching cubes sur le champ LISSÉ
+# (gaussien) : le lissage du champ place les sommets en sub-voxel -> bien
+# moins de marches qu'un lissage de maillage après coup (et beaucoup plus
+# rapide). Étanche, dimensions exactes. Attention : sur un mesh très troué à
+# haute résolution, le remplissage peut fuir -> préférer Ultra dans ce cas.
 # ---------------------------------------------------------------------------
-def voxel_remesh(path: str, pitch_ratio: float = 0.006, smooth: int = 8,
+def voxel_remesh(path: str, pitch_ratio: float = 0.006, smooth: float = 0.8,
                  max_faces: int = 2000000) -> trimesh.Trimesh:
+    from scipy import ndimage
+    from skimage import measure
+
     _p("Lecture du modèle", 5)
     m = _load(path)
     pitch = float(m.extents.max()) * float(pitch_ratio)
@@ -114,16 +159,17 @@ def voxel_remesh(path: str, pitch_ratio: float = 0.006, smooth: int = 8,
     vox = m.voxelized(pitch=pitch)
     _p("Remplissage du volume", 45)
     grid = vox.fill()
-    _p("Reconstruction de la surface", 65)
-    rem = grid.marching_cubes.copy()
-    # CRUCIAL : marching_cubes renvoie un mesh en coordonnées de grille ;
-    # on applique la transform (échelle = pitch, origine) pour revenir en mm.
+    _p("Reconstruction de la surface", 70)
+    pad = 3
+    mat = np.pad(grid.matrix.astype(np.float32), pad)
+    # sigma plafonné à 1.0 : au-delà, les pièces fines (1 voxel) disparaissent
+    sigma = min(float(smooth), 1.0)
+    field = ndimage.gaussian_filter(mat, sigma=sigma) if sigma > 0 else mat
+    v, faces, _, _ = measure.marching_cubes(field, level=0.5)
+    v -= pad
+    rem = trimesh.Trimesh(v, faces, process=True)
+    # repasse en mm : la transform de la grille porte l'échelle et l'origine
     rem.apply_transform(grid.transform)
-    # Lissage Taubin : gomme l'effet "marches d'escalier" des voxels SANS
-    # rétrécir le modèle (préserve le volume), et garde l'étanchéité.
-    if smooth and int(smooth) > 0:
-        _p("Lissage", 80)
-        trimesh.smoothing.filter_taubin(rem, iterations=int(smooth))
     if len(rem.faces) > max_faces:
         _p("Allègement", 90)
         dec = _decimate(rem, max_faces)
@@ -181,22 +227,27 @@ def convex_hull(path: str) -> trimesh.Trimesh:
 
 
 METHODS = {
+    "ultra": {
+        "fn": winding_remesh,
+        "label": "Ultra — Winding Numbers ⭐",
+        "desc": "La meilleure : test intérieur/extérieur robuste même sur mesh troué (techno du remesher de Blender), surface sub-voxel sans marches, pièces fines préservées. Étanche garanti.",
+        "params": [
+            {"name": "resolution", "label": "Résolution (voxels/axe, haut = + fin, + lent)",
+             "type": "int", "default": 300, "min": 100, "max": 500, "step": 25},
+            {"name": "smooth", "label": "Lissage du champ (0 = brut)",
+             "type": "float", "default": 1.0, "min": 0, "max": 2, "step": 0.2},
+        ],
+    },
     "voxel": {
         "fn": voxel_remesh,
-        "label": "Voxel — Solide ⭐",
-        "desc": "Reconstruit un solide étanche, dimensions exactes. Pousse la finesse vers le minimum pour un rendu ≈ 1:1 (plus lent, fichier plus lourd). Le choix sûr.",
+        "label": "Voxel — Solide",
+        "desc": "Rapide et sûr sur un modèle déjà fermé. Surface sub-voxel (champ lissé). Sur un mesh très troué à haute finesse, préfère Ultra.",
         "params": [
             {"name": "pitch_ratio", "label": "Finesse (bas = Max ≈1:1, + lent)",
              "type": "float", "default": 0.006, "min": 0.0015, "max": 0.02, "step": 0.0005},
             {"name": "smooth", "label": "Lissage anti-cubes (0 = brut)",
-             "type": "int", "default": 8, "min": 0, "max": 40, "step": 2},
+             "type": "float", "default": 0.8, "min": 0, "max": 1, "step": 0.1},
         ],
-    },
-    "meshfix": {
-        "fn": meshfix_repair,
-        "label": "Fidèle (MeshFix)",
-        "desc": "Répare en gardant la géométrie d'origine (zéro perte de résolution). Excellent si le modèle s'y prête, mais peut échouer sur les assets très fragmentés.",
-        "params": [],
     },
     "poisson": {
         "fn": poisson_repair,
