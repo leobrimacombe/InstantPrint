@@ -5,7 +5,7 @@
 ; Prérequis : avoir déjà lancé  pyinstaller instantprint.spec  (crée dist\InstantPrint\).
 
 #define MyAppName "InstantPrint"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "InstantPrint"
 #define MyAppExeName "InstantPrint.exe"
 
