@@ -336,13 +336,18 @@ def shell_remesh(path: str, resolution: int = 400, close_mm: float = 2.0,
         keep = counts >= max(30, int(0.0005 * counts.max()))
         solid = keep[lbl2]
 
-    # lissage PROTÉGÉ : les cellules solides restent >0.5 -> le lissage ne
-    # peut ni rouvrir un trou bouché ni effacer une pièce fine
+    # lissage avec protection CIBLÉE : seules les zones fines (membranes
+    # <=2 voxels : bouchons d'ouvertures, ailerons) sont verrouillées
+    # au-dessus du seuil. Les surfaces épaisses (coque) gardent le placement
+    # sub-voxel du champ lissé -> pas de marches visibles. (Verrouiller TOUT
+    # le solide recollerait la surface sur la grille = retour des voxels.)
     field = solid.astype(np.float32)
     if smooth and float(smooth) > 0:
         _p("Lissage du champ", 78)
         field = ndimage.gaussian_filter(field, sigma=min(float(smooth), 1.2))
-        field = np.maximum(field, solid.astype(np.float32) * 0.55)
+        core = ndimage.binary_erosion(solid)
+        thin = solid & ~ndimage.binary_dilation(core)
+        field = np.maximum(field, thin.astype(np.float32) * 0.55)
 
     _p("Reconstruction de la surface", 85)
     v, faces, _, _ = measure.marching_cubes(field, level=0.5)
