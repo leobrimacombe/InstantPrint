@@ -93,6 +93,7 @@ async def do_repair(
     smooth: float = Form(1.0),
     resolution: int = Form(300),
     close_mm: float = Form(2.0),
+    hole_size: int = Form(150),
     depth: int = Form(9),
 ):
     repair._p("Réception du fichier", 1)
@@ -131,7 +132,8 @@ async def do_repair(
     # Exécuté dans un thread pour que /api/repair/progress reste interrogeable.
     spec = repair.METHODS[method]
     available = {"pitch_ratio": pitch_ratio, "smooth": smooth,
-                 "resolution": resolution, "close_mm": close_mm, "depth": depth}
+                 "resolution": resolution, "close_mm": close_mm,
+                 "hole_size": hole_size, "depth": depth}
     kwargs = {p["name"]: available[p["name"]]
               for p in spec["params"] if p["name"] in available}
     try:

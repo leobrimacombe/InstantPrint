@@ -402,6 +402,70 @@ def shell_remesh(path: str, resolution: int = 500, close_mm: float = 2.0,
 
 
 # ---------------------------------------------------------------------------
+# METHODE 6 — NETTOYAGE FIDÈLE (pipeline MeshLab)
+# Reproduit le workflow MeshLab manuel pour assets de jeu, SANS remesh :
+# la géométrie d'origine est conservée à 100 %.
+#   1. soude les points proches + retire doublons (faces et sommets)
+#   2. répare le non-manifold (arêtes, puis sommets par séparation)
+#   3. bouche les trous (cockpit, passages de roues...) jusqu'à une taille max
+# Ne garantit PAS l'étanchéité sur un modèle très cassé (utiliser Coquille
+# dans ce cas), mais quand ça passe, c'est la fidélité parfaite.
+# ---------------------------------------------------------------------------
+def meshlab_clean(path: str, hole_size: int = 150) -> trimesh.Trimesh:
+    import pymeshlab
+    _p("Lecture du modèle", 5)
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(path)
+
+    # Étape 1 — assainir : souder + dédupliquer
+    _p("Soudure des points proches", 15)
+    ms.meshing_merge_close_vertices()
+    ms.meshing_remove_duplicate_faces()
+    ms.meshing_remove_duplicate_vertices()
+
+    # Étape 2 — réparer le non-manifold
+    _p("Réparation non-manifold", 35)
+    ms.meshing_repair_non_manifold_edges()
+    try:
+        ms.meshing_repair_non_manifold_vertices()
+    except Exception:
+        pass
+
+    # Étape 3 — boucher les trous (plusieurs passes : la fermeture peut
+    # faire apparaître de nouveaux bords à traiter)
+    for i in range(3):
+        _p("Bouchage des trous", 55 + i * 10)
+        try:
+            ms.meshing_close_holes(maxholesize=int(hole_size))
+        except Exception:
+            try:
+                ms.meshing_repair_non_manifold_edges()
+                ms.meshing_close_holes(maxholesize=int(hole_size))
+            except Exception:
+                break
+
+    # Étape 4 — export (STL binaire) puis rechargement
+    _p("Finalisation", 90)
+    fd, out = tempfile.mkstemp(suffix=".stl")
+    os.close(fd)
+    try:
+        ms.save_current_mesh(out)
+        r = _load(out)
+    finally:
+        try:
+            os.unlink(out)
+        except OSError:
+            pass
+    # finition : boucheur de trous de trimesh sur ce qui reste (cas simples)
+    for _ in range(3):
+        if r.is_watertight:
+            break
+        r.fill_holes()
+    trimesh.repair.fix_normals(r)
+    return r
+
+
+# ---------------------------------------------------------------------------
 # METHODE 4 — CONVEX HULL
 # Dernier recours : enveloppe convexe pleine autour du modèle. Toujours
 # imprimable mais perd toute la forme concave. Utile pour un socle / test.
@@ -447,6 +511,15 @@ METHODS = {
         "label": "Convex Hull — dernier recours",
         "desc": "Enveloppe pleine. Toujours imprimable mais perd les concavités.",
         "params": [],
+    },
+    "meshlab": {
+        "fn": meshlab_clean,
+        "label": "Nettoyage fidèle (MeshLab) 🛠",
+        "desc": "Le workflow MeshLab classique : soude, déduplique, répare le non-manifold, bouche les trous (cockpit, roues). Géométrie d'origine conservée à 100 % — mais étanchéité non garantie sur un modèle très cassé.",
+        "params": [
+            {"name": "hole_size", "label": "Taille max des trous à boucher",
+             "type": "int", "default": 150, "min": 10, "max": 500, "step": 10},
+        ],
     },
     "shell": {
         "fn": shell_remesh,
