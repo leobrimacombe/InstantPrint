@@ -414,6 +414,14 @@ def shell_remesh(path: str, resolution: int = 500, close_mm: float = 2.0,
 def meshlab_clean(path: str, hole_size: int = 150) -> trimesh.Trimesh:
     import pymeshlab
     _p("Lecture du modèle", 5)
+    # Diagnostic d'abord : si le modèle est DÉJÀ étanche, on ne touche à
+    # rien — la soudure de points sur un mesh sain fusionne les coutures
+    # entre panneaux et CASSE l'étanchéité (constaté sur le Gladius).
+    pre = _load(path)
+    if pre.is_watertight:
+        _p("Déjà étanche — rien à réparer", 90)
+        trimesh.repair.fix_normals(pre)
+        return pre
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(path)
 
