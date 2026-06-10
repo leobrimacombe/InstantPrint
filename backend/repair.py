@@ -464,46 +464,90 @@ def meshlab_clean(path: str, hole_size: int = 150) -> trimesh.Trimesh:
             os.unlink(out)
         except OSError:
             pass
-    # Étape 5 — réparation PAR COMPOSANT de ce qui reste ouvert. Sur les rips
-    # très fragmentés (centaines de pièces), le bouchage global plafonne ;
-    # pièce par pièce, MeshFix excelle. Escalade par morceau :
+    # Étape 5 — réparation PAR COMPOSANT de ce qui reste ouvert, avec
+    # GARDE-FOU DE COUVERTURE : un candidat n'est accepté que si ≥95 % de la
+    # surface de la pièce d'origine est retrouvée à <1 mm (sinon MeshFix
+    # "répare" les feuilles en les réduisant à des blobs -> pièces qui
+    # disparaissent). Escalade par morceau :
     #   fermé -> gardé tel quel (fidélité 100 %)
-    #   poussière (<4 faces, non imprimable) -> supprimée
-    #   ouvert -> MeshFix ; sinon enveloppe convexe ; sinon gardé ouvert
+    #   poussière (<4 faces) -> supprimée
+    #   MeshFix -> épaississement voxel (feuilles) -> hull (petites pièces)
+    #   -> sinon GARDÉE OUVERTE (pièce visible > étanchéité)
     if not r.is_watertight:
         _p("Réparation pièce par pièce", 92)
         try:
-            import pymeshfix
-            parts = []
-            for c in r.split(only_watertight=False):
-                if c.is_watertight:
-                    parts.append(c)
-                    continue
-                if len(c.faces) < 4:
-                    continue
-                try:
-                    mf = pymeshfix.MeshFix(c.vertices, c.faces)
-                    mf.repair(joincomp=False, remove_smallest_components=False)
-                    cc = trimesh.Trimesh(mf.points, mf.faces, process=True)
-                    if len(cc.faces) > 0 and cc.is_watertight:
-                        parts.append(cc)
-                        continue
-                except Exception:
-                    pass
-                try:
-                    h = c.convex_hull
-                    if h.is_watertight:
-                        parts.append(h)
-                        continue
-                except Exception:
-                    pass
-                parts.append(c)
-            if parts:
-                r = trimesh.util.concatenate(parts)
+            r = _repair_components(r)
         except Exception:
-            pass  # pymeshfix indisponible : on garde le résultat du pipeline
+            pass  # dépendance manquante : on garde le résultat du pipeline
     trimesh.repair.fix_normals(r)
     return r
+
+
+def _coverage_ok(c, cand, tol: float = 1.0, max_lost: float = 0.05) -> bool:
+    """Vrai si ≥(1-max_lost) de la surface de c est à <tol mm de cand."""
+    import igl
+    try:
+        n = int(min(2000, max(200, len(c.faces) // 4)))
+        pts, _ = trimesh.sample.sample_surface(c, n)
+        sq, _, _ = igl.point_mesh_squared_distance(
+            np.ascontiguousarray(pts, dtype=np.float64),
+            np.ascontiguousarray(cand.vertices, dtype=np.float64),
+            np.ascontiguousarray(cand.faces, dtype=np.int64))
+        return float((np.sqrt(np.maximum(sq, 0.0)) > tol).mean()) <= max_lost
+    except Exception:
+        return False
+
+
+def _thicken(c, thickness: float):
+    """Feuille sans épaisseur -> plaque fine étanche qui épouse sa forme
+    (voxelisation de surface + dilatation + marching cubes)."""
+    from scipy import ndimage
+    from skimage import measure
+    try:
+        pitch = max(thickness / 2.0, float(c.extents.max()) / 300.0)
+        g = c.voxelized(pitch=pitch)
+        mat = ndimage.binary_dilation(np.pad(g.matrix, 1))
+        v, f, _, _ = measure.marching_cubes(mat.astype(np.float32), 0.5)
+        v -= 1
+        t = trimesh.Trimesh(v, f, process=False)
+        t.apply_transform(g.transform)
+        return t if t.is_watertight else None
+    except Exception:
+        return None
+
+
+def _repair_components(r) -> trimesh.Trimesh:
+    import pymeshfix
+    thickness = max(0.8, min(3.0, float(r.extents.max()) * 0.0015))
+    parts = []
+    for c in r.split(only_watertight=False):
+        if c.is_watertight:
+            parts.append(c)
+            continue
+        if len(c.faces) < 4:
+            continue
+        cand = None
+        try:
+            mf = pymeshfix.MeshFix(c.vertices, c.faces)
+            mf.repair(joincomp=False, remove_smallest_components=False)
+            cc = trimesh.Trimesh(mf.points, mf.faces, process=True)
+            if len(cc.faces) > 0 and cc.is_watertight and _coverage_ok(c, cc):
+                cand = cc
+        except Exception:
+            pass
+        if cand is None:
+            t = _thicken(c, thickness)
+            if t is not None and _coverage_ok(c, t, tol=max(1.5, thickness)):
+                cand = t
+        if cand is None and len(c.faces) < 60:
+            try:
+                h = c.convex_hull
+                if h.is_watertight:
+                    cand = h
+            except Exception:
+                pass
+        parts.append(cand if cand is not None else c)
+    return trimesh.util.concatenate(parts) if parts else r
 
 
 # ---------------------------------------------------------------------------
