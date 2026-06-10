@@ -464,11 +464,44 @@ def meshlab_clean(path: str, hole_size: int = 150) -> trimesh.Trimesh:
             os.unlink(out)
         except OSError:
             pass
-    # finition : boucheur de trous de trimesh sur ce qui reste (cas simples)
-    for _ in range(3):
-        if r.is_watertight:
-            break
-        r.fill_holes()
+    # Étape 5 — réparation PAR COMPOSANT de ce qui reste ouvert. Sur les rips
+    # très fragmentés (centaines de pièces), le bouchage global plafonne ;
+    # pièce par pièce, MeshFix excelle. Escalade par morceau :
+    #   fermé -> gardé tel quel (fidélité 100 %)
+    #   poussière (<4 faces, non imprimable) -> supprimée
+    #   ouvert -> MeshFix ; sinon enveloppe convexe ; sinon gardé ouvert
+    if not r.is_watertight:
+        _p("Réparation pièce par pièce", 92)
+        try:
+            import pymeshfix
+            parts = []
+            for c in r.split(only_watertight=False):
+                if c.is_watertight:
+                    parts.append(c)
+                    continue
+                if len(c.faces) < 4:
+                    continue
+                try:
+                    mf = pymeshfix.MeshFix(c.vertices, c.faces)
+                    mf.repair(joincomp=False, remove_smallest_components=False)
+                    cc = trimesh.Trimesh(mf.points, mf.faces, process=True)
+                    if len(cc.faces) > 0 and cc.is_watertight:
+                        parts.append(cc)
+                        continue
+                except Exception:
+                    pass
+                try:
+                    h = c.convex_hull
+                    if h.is_watertight:
+                        parts.append(h)
+                        continue
+                except Exception:
+                    pass
+                parts.append(c)
+            if parts:
+                r = trimesh.util.concatenate(parts)
+        except Exception:
+            pass  # pymeshfix indisponible : on garde le résultat du pipeline
     trimesh.repair.fix_normals(r)
     return r
 
@@ -523,7 +556,7 @@ METHODS = {
     "meshlab": {
         "fn": meshlab_clean,
         "label": "Nettoyage fidèle (MeshLab) 🛠",
-        "desc": "Le workflow MeshLab classique : soude, déduplique, répare le non-manifold, bouche les trous (cockpit, roues). Géométrie d'origine conservée à 100 % — mais étanchéité non garantie sur un modèle très cassé.",
+        "desc": "Soude, déduplique, répare le non-manifold, bouche les trous, puis répare pièce par pièce ce qui reste (MeshFix par composant). Géométrie d'origine conservée au maximum. Ne touche à rien si le modèle est déjà étanche.",
         "params": [
             {"name": "hole_size", "label": "Taille max des trous à boucher",
              "type": "int", "default": 150, "min": 10, "max": 500, "step": 10},

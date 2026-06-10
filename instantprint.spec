@@ -18,6 +18,7 @@ hiddenimports = []
 # Paquets natifs lourds : on ramasse tout (DLL, plugins, données).
 for pkg in (
     "pymeshlab",
+    "pymeshfix",
     "igl",
     "scipy",
     "skimage",
