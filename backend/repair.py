@@ -402,6 +402,41 @@ def shell_remesh(path: str, resolution: int = 500, close_mm: float = 2.0,
 
 
 # ---------------------------------------------------------------------------
+# METHODE 7 — COQUILLE HD (ALPHA WRAP, CGAL)
+# La coquille SANS voxels : une "bulle" se rétracte autour du modèle par
+# triangulation adaptative (CGAL Alpha Wrap, 2022). Garanties : étanche et
+# sans auto-intersection. Triangles adaptatifs (petits dans les détails,
+# grands sur les zones plates) -> aucun rendu "grille", maillage léger.
+#   alpha  = taille du détail exploré (mm) : petit = + fin, + lent
+#   offset = distance de la peau au modèle (mm) : petit = + fidèle
+# Comme la Coquille voxel : capture l'extérieur, bouche les petites
+# ouvertures (< alpha), donne ~2*offset d'épaisseur aux feuilles (vitres).
+# ---------------------------------------------------------------------------
+def alphawrap_remesh(path: str, alpha_mm: float = 1.0,
+                     offset_mm: float = 0.25) -> trimesh.Trimesh:
+    import pymeshlab
+    _p("Lecture du modèle", 5)
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(path)
+    _p("Enveloppe Alpha Wrap (CGAL)", 25)
+    ms.generate_alpha_wrap(alpha=pymeshlab.PureValue(float(alpha_mm)),
+                           offset=pymeshlab.PureValue(float(offset_mm)))
+    _p("Finalisation", 90)
+    fd, out = tempfile.mkstemp(suffix=".stl")
+    os.close(fd)
+    try:
+        ms.save_current_mesh(out)
+        r = _load(out)
+    finally:
+        try:
+            os.unlink(out)
+        except OSError:
+            pass
+    trimesh.repair.fix_normals(r)
+    return r
+
+
+# ---------------------------------------------------------------------------
 # METHODE 6 — NETTOYAGE FIDÈLE (pipeline MeshLab)
 # Reproduit le workflow MeshLab manuel pour assets de jeu, SANS remesh :
 # la géométrie d'origine est conservée à 100 %.
@@ -604,6 +639,17 @@ METHODS = {
         "params": [
             {"name": "hole_size", "label": "Taille max des trous à boucher",
              "type": "int", "default": 150, "min": 10, "max": 500, "step": 10},
+        ],
+    },
+    "alphawrap": {
+        "fn": alphawrap_remesh,
+        "label": "Coquille HD — Alpha Wrap ✨",
+        "desc": "La coquille SANS voxels (CGAL) : triangulation adaptative qui épouse l'extérieur. Étanche garanti, maillage léger, zéro effet grille. Donne de l'épaisseur aux vitres (~2× écart).",
+        "params": [
+            {"name": "alpha_mm", "label": "Détail exploré (mm, bas = + fin, + lent)",
+             "type": "float", "default": 1.0, "min": 0.3, "max": 5, "step": 0.1},
+            {"name": "offset_mm", "label": "Écart à la surface (mm, bas = + fidèle)",
+             "type": "float", "default": 0.25, "min": 0.05, "max": 1, "step": 0.05},
         ],
     },
     "shell": {
