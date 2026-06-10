@@ -7,6 +7,7 @@ attend qu'il réponde, puis affiche le frontend dans une fenêtre native
 
 C'est ce fichier qui est empaqueté en .exe par PyInstaller (voir instantprint.spec).
 """
+import os
 import sys
 import time
 import socket
@@ -99,8 +100,25 @@ def wait_for_server(port: int, timeout: float = 60.0) -> bool:
     return False
 
 
+def quit_app() -> None:
+    """Ferme la fenêtre puis le process. Appelé par l'updater juste après le
+    lancement de l'installeur, pour libérer les fichiers sans dialogue."""
+    try:
+        for w in list(webview.windows):
+            w.destroy()
+    except Exception:
+        pass
+    # garantie : on tue le process peu après (l'installeur est déjà détaché et
+    # relancera l'app). os._exit évite que des threads non-daemon bloquent.
+    def _hard_exit():
+        os._exit(0)
+    threading.Timer(0.6, _hard_exit).start()
+
+
 def main() -> None:
     claim_mutex()
+    import updater
+    updater.set_quit_hook(quit_app)
     threading.Thread(target=run_server, daemon=True).start()
     wait_for_server(PORT)
     webview.create_window(

@@ -5,18 +5,19 @@
 ; Prérequis : avoir déjà lancé  pyinstaller instantprint.spec  (crée dist\InstantPrint\).
 
 #define MyAppName "InstantPrint"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.1"
 #define MyAppPublisher "InstantPrint"
 #define MyAppExeName "InstantPrint.exe"
 
 [Setup]
 AppId={{B7E4B0F2-4A2E-4C9A-9D3F-1A2B3C4D5E6F}
-; Mutex de l'app (doit correspondre à APP_MUTEX dans desktop.py) : permet à
-; l'installeur de détecter/fermer l'app lors d'une mise à jour.
-AppMutex=InstantPrint_SingleInstance
-; Restart Manager : ferme l'app en cours puis la relance après installation.
+; Pas d'AppMutex : il ferait apparaître un dialogue bloquant "fermez l'app".
+; À la place, l'app se ferme TOUTE SEULE après avoir lancé l'installeur
+; (voir updater.py), et l'entrée [Run] ci-dessous la relance ensuite.
+; CloseApplications=yes reste en filet (fermeture silencieuse via le
+; Restart Manager si une instance traînait), sans dialogue puisque pas d'AppMutex.
 CloseApplications=yes
-RestartApplications=yes
+RestartApplications=no
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -52,4 +53,5 @@ Name: "{group}\Désinstaller {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; postinstall sans skipifsilent : relance l'app aussi après une MAJ silencieuse
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall

@@ -125,17 +125,28 @@ def _download(url: str, dest: str) -> None:
                 _set(percent=int(read * 100 / total))
 
 
+# Fonction de fermeture de l'app, fournie par desktop.py (voir set_quit_hook).
+_quit_hook = None
+
+
+def set_quit_hook(fn) -> None:
+    """desktop.py enregistre ici de quoi fermer la fenêtre + le process."""
+    global _quit_hook
+    _quit_hook = fn
+
+
 def _launch_installer(path: str) -> None:
-    """Windows : lance l'installeur Inno Setup en silencieux (le Restart
-    Manager ferme puis relance l'app). macOS : ouvre le .zip/.dmg téléchargé
-    dans le Finder — l'utilisateur glisse la nouvelle app dans Applications."""
+    """Windows : lance l'installeur Inno Setup en silencieux. macOS : ouvre le
+    .zip/.dmg téléchargé dans le Finder (l'utilisateur glisse l'app dans
+    Applications)."""
     if sys.platform == "darwin":
         subprocess.Popen(["open", path], close_fds=True)
         return
-    flags = ["/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS", "/NOCANCEL", "/SP-"]
-    creation = 0
-    if sys.platform == "win32":
-        creation = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    # /SILENT : barre de progression sans questions. Pas de /RESTARTAPPLICATIONS :
+    # l'app se ferme elle-même (ci-dessous) et l'entrée [Run] de l'installeur la
+    # relance -> aucun dialogue "fermez l'application".
+    flags = ["/SILENT", "/NOCANCEL", "/SP-", "/CLOSEAPPLICATIONS"]
+    creation = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen([path] + flags, creationflags=creation, close_fds=True)
 
 
@@ -148,7 +159,11 @@ def _worker(url: str, version: str) -> None:
         _set(phase="launching", percent=100)
         _launch_installer(dest)
         _set(phase="done")
-        # L'installeur va fermer cette app sous peu (Restart Manager).
+        # Windows : on ferme l'app nous-mêmes pour libérer les fichiers et
+        # éviter tout dialogue. Délai court : laisse l'UI afficher "redémarrage"
+        # et l'installeur démarrer avant qu'on disparaisse.
+        if sys.platform == "win32" and _quit_hook:
+            threading.Timer(1.5, _quit_hook).start()
     except Exception as e:
         _set(phase="error", error=f"{type(e).__name__}: {e}")
 
